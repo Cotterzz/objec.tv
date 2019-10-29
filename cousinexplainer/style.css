@@ -1,0 +1,50 @@
+body {
+	margin:0px;
+	padding:0px;
+    overflow:hidden;
+}
+
+#rootnode{
+	font-size: 20px;
+	
+}
+
+.node {
+	font-family: 'Vollkorn', serif;
+    font-size: 16px;
+    padding: 2px;
+    border: 3px solid #D22C59;
+    border-radius: 1px;
+    background: #FFFFFF;
+    position: absolute;
+    z-index: 9;
+    cursor:default;
+    width:100px;
+}
+
+.UI {
+    font-family: 'Abel', sans-serif;
+    font-size: 16px;
+    padding: 10px;
+    border: 1px solid #000000;
+    border-radius: 0px;
+    background: #F2F2F2;
+    cursor:default;
+    width: 250px;
+}
+
+.note {
+	font-family: 'Permanent+Marker', cursive;
+    font-size: 12px;
+	padding: 5px;
+    border: 2px solid #777777;
+    border-radius: 3px;
+    background: #ffffff;
+    cursor:default;
+    width: 150px;
+}
+
+
+svg {
+    position: absolute;
+}

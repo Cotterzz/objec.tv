@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset="UTF-8">
+  		<meta name="author" content="John Cotterell">
+  		<title>NodeWeaver</title>
+  		<link href="https://fonts.googleapis.com/css?family=Permanent+Marker|Abel|Vollkorn:600" rel="stylesheet">
+  		<link rel="stylesheet" type="text/css" href="style.css">
+  		<script src="https://www.gstatic.com/firebasejs/5.7.0/firebase.js"></script>
+			<script>
+  			// Initialize Firebase
+ 			 var config = {
+    			apiKey: "AIzaSyBvJ1UAm4EvsT9-iGNV7fCISDbA38K0INQ",
+    			authDomain: "nodeweaver-3db7c.firebaseapp.com",
+    			databaseURL: "https://nodeweaver-3db7c.firebaseio.com",
+    			projectId: "nodeweaver-3db7c",
+    			storageBucket: "nodeweaver-3db7c.appspot.com",
+    			messagingSenderId: "201179043760"
+  			};
+  			firebase.initializeApp(config);
+			</script>
+			<script src="https://cdn.firebase.com/libs/firebaseui/3.1.1/firebaseui.js"></script>
+			<link type="text/css" rel="stylesheet" href="https://cdn.firebase.com/libs/firebaseui/3.1.1/firebaseui.css" />
+	</head>
+	<body>
+<div id="drawing"></div>
+	
+<div id="rootnode">
+	
+ <div class="node note" id="0" style="left: 6.60025%; top: 25%;"><div class="nodetitle">INSTRUCTIONS</div><div class="node note" id="1" style="left: -70px; top: 44px;"><div class="nodetitle">Click and drag nodes to move them</div><div class="node note" id="2" style="left: 79px; top: 56px;"><div class="nodetitle">Double click a node to edit the title</div><div class="node note" id="3" style="left: -96px; top: 56px;"><div class="nodetitle">Right Click a node to detach it.</div><div class="node note" id="4" style="left: 81px; top: 47px;"><div class="nodetitle">Drop a node over another node to attach it back into the hierarchy</div><div class="node note" id="5" style="left: -82px; top: 67px;"><div class="nodetitle">Right click on empty space to create a new node</div><div class="node note" id="6" style="left: 90px; top: 48px;"><div class="nodetitle">Ctrl-S to save your work if you're logged in.</div><div class="node note" style="top: 50px; left: -85px;" id="7">
+  								<div class="nodetitle">Ctrl and + or - or  scrollwheel to change overall size</div>
+  							<div class="node note" id="8" style="left: 43px; top: 69px;"><div class="nodetitle">Apple users will have to use cmd instead of ctrl</div></div></div></div></div></div></div></div></div></div>
+			
+
+<div class="node" id="9" style="left: 71.754%; top: 6.02564%;"><div class="nodetitle">Great great grandparent</div><div class="node" id="10" style="left: -188px; top: 90px;"><div class="nodetitle">Great grand parent</div><div class="node" id="11" style="left: -104px; top: 81px;"><div class="nodetitle">Grand parent</div><div class="node" id="12" style="left: -74px; top: 88px;"><div class="nodetitle">Parent</div><div class="node" id="13" style="left: -69px; top: 105px;"><div class="nodetitle">You!!</div><div class="node" id="14" style="left: -3px; top: 72px;"><div class="nodetitle">Child</div><div class="node" id="15" style="left: -8px; top: 93px;"><div class="nodetitle">Grand child</div></div></div></div><div class="node" id="16" style="left: 54px; top: 90px;"><div class="nodetitle">Sister/ Brother</div><div class="node" id="17" style="left: 0px; top: 69px;"><div class="nodetitle">Niece/ Nephew</div><div class="node" id="18" style="left: 5px; top: 100px;"><div class="nodetitle">Grand niece/nephew</div></div></div></div></div><div class="node" id="19" style="left: 60px; top: 93px;"><div class="nodetitle">Aunt/Uncle</div><div class="node" id="20" style="left: 48px; top: 93px;"><div class="nodetitle">First Cousin</div><div class="node" id="21" style="left: 1px; top: 60px;"><div class="nodetitle">First Cousin once removed</div><div class="node" id="22" style="left: 0px; top: 89px;"><div class="nodetitle">First Cousin twice removed</div></div></div></div></div></div><div class="node" id="23" style="left: 155px; top: 74px;"><div class="nodetitle">Great aunt/uncle</div><div class="node" id="24" style="left: -5px; top: 84px;"><div class="nodetitle">First cousin once removed</div><div class="node" id="25" style="left: 1px; top: 94px;"><div class="nodetitle">Second Cousin</div><div class="node" id="26" style="left: -5px; top: 74px;"><div class="nodetitle">Second Cousin once removed</div><div class="node" id="27" style="left: -2px; top: 93px;"><div class="nodetitle">Second Cousin twice removed</div></div></div></div></div></div></div><div class="node" id="28" style="left: 129px; top: 89px;"><div class="nodetitle">Great grand aunt/uncle</div><div class="node" id="29" style="left: -1px; top: 63px;"><div class="nodetitle">First cousin twice removed</div><div class="node" id="30" style="left: -3px; top: 94px;"><div class="nodetitle">Second Cousin once removed</div><div class="node" id="31" style="left: -2px; top: 98px;"><div class="nodetitle">Third Cousin</div><div class="node" id="32" style="left: 0px; top: 68px;"><div class="nodetitle">Third Cousin once removed</div><div class="node" id="33" style="left: -3px; top: 95px;"><div class="nodetitle">Third Cousin twice removed</div></div></div></div></div></div></div></div></div>
+	<div class="node UI" style="top: 1%; left: 1%;" id="21">
+				<div class="nodetitle" id="logintext">LOGIN</div>
+				<div id="firebaseui-auth-container"></div>
+				<div id="loader">Loading...</div>
+	</div>
+</div>		
+			<script src="js/svg.min.js"></script>
+		
+		<script>
+
+
+
+			var provider = new firebase.auth.GoogleAuthProvider();
+
+			// Initialize the FirebaseUI Widget using Firebase.
+			var ui = new firebaseui.auth.AuthUI(firebase.auth());
+
+			var uiConfig = {
+  callbacks: {
+    signInSuccessWithAuthResult: function(authResult, redirectUrl) {
+      signedIn();
+      return false;
+    },
+    uiShown: function() {
+      // The widget is rendered.
+      // Hide the loader.
+      document.getElementById('loader').style.display = 'none';
+    }
+  },
+  // Will use popup for IDP Providers sign-in flow instead of the default, redirect.
+  signInFlow: 'popup',
+  signInSuccessUrl: '/',
+  signInOptions: [
+    // Leave the lines as is for the providers you want to offer your users.
+    firebase.auth.GoogleAuthProvider.PROVIDER_ID,
+    firebase.auth.EmailAuthProvider.PROVIDER_ID
+  ]
+  // Terms of service url.
+  //tosUrl: '<your-tos-url>',
+  // Privacy policy url.
+  //privacyPolicyUrl: '<your-privacy-policy-url>'
+};
+// The start method will wait until the DOM is loaded.
+var user = firebase.auth().currentUser;
+
+if (user) {
+  signedIn();
+} else {
+  ui.start('#firebaseui-auth-container', uiConfig);
+}
+
+function signedIn(){
+	user = firebase.auth().currentUser;
+	var database = firebase.database();
+
+	firebase.database().ref('/users/' + user.uid).once('value').then(function(snapshot) {
+  		console.log("SNAPSHOT:", snapshot.val().mapDataText);
+  		document.getElementById("rootnode").outerHTML = snapshot.val().mapDataText;
+  		scanNodes();
+		addLines();
+	});
+	console.log("signedIn", user);
+	var textContent;
+	if(user.displayName){textContent = user.displayName;} else {textContent = user.email;}
+				var newText = document.createElement("DIV");//console.log("2");
+
+				
+				newText.setAttribute("class", "nodetitle");//console.log("3");
+				var t = document.createTextNode("Logged in as: " + textContent);//console.log("4");       // Create a text node
+				newText.appendChild(t);//console.log("5");
+				var nodeReplace = document.getElementById("logintext");
+				nodeReplace.parentNode.replaceChild (newText, nodeReplace);
+				if(user.photoURL){
+					var newImage = document.createElement("IMG");
+
+					newImage.src = user.photoURL;
+					newText.appendChild(newImage);
+					newImage.style.width = "50px";
+					newImage.style.height = "50px";
+				}
+
+}
+
+			// attach the document listeners
+			var dragging = false;
+			var dragged = null;
+			var detached = false;
+			var pos1, pos2, pos3, pos4;
+
+			var draw = SVG('drawing').size('100%', '100%');
+			//var line = draw.line(0, 0, 100, 150).stroke({ width: 3 });
+			//line.plot(50, 30, 100, 150);
+			//line.plot('0,0 100,150');
+			//line.plot([[0, 0], [100, 150]]);
+			//line.animate(3000).plot([[200, 200], [100, 150]]);
+
+			var nodesArray = [];
+			var lines = [];
+
+
+
+
+
+			function scanNodes(){
+				var nodesObject = document.getElementsByClassName("node");
+
+				for (var i = nodesObject.length - 1; i >= 0; i--) {
+					nodesArray[i] = nodesObject[i];
+					nodesArray[i].id = String(i);
+				}
+			}
+
+			function addLines(){
+				for (var i = nodesArray.length - 1; i >= 0; i--) {
+					
+						
+						addLine(i);
+					
+				}
+			}
+
+			function addLine(num){
+				var box1 = nodesArray[num].getBoundingClientRect();
+				var box2 = nodesArray[num].parentNode.getBoundingClientRect();
+				var x1 = box1.left + (box1.width/2);
+				var y1 = box1.top + (box1.height/2);
+				var x2 = box2.left + (box2.width/2);
+				var y2 = box2.top + (box2.height/2);
+				if(lines[num]){
+					lines[num].plot([['M',x1,y1], ['C',x2,y1,(x1+x2)/2,(y1+y2)/2,x2,y2]]);
+				} else{
+					lines[num] = draw.path([['M',x1,y1], ['C',x2,y1,(x1+x2)/2,(y1+y2)/2,x2,y2]]).fill('none').stroke({ width: 2 , color:"#cccccc"});
+				}
+				
+				if(!nodesArray[num].parentNode.classList.contains("node")){
+						lines[num].hide();
+				}
+			}
+
+			function updateLine(node){
+				if(node.parentNode.classList.contains("node")){
+					var box1 = node.getBoundingClientRect();
+					var box2 = node.parentNode.getBoundingClientRect();
+					var x1 = box1.left + (box1.width/2);
+					var y1 = box1.top + (box1.height/2);
+					var x2 = box2.left + (box2.width/2);
+					var y2 = box2.top + (box2.height/2);
+					var line = lines[Number(node.id)];
+					//line.plot(x1, y1, x2, y2);
+					line.plot([['M',x1,y1], ['C',x2,y1,(x1+x2)/2,(y1+y2)/2,x2,y2]]);
+
+					//line.plot([['M', x1, y1],['L', x2, y2]]);
+				}
+				if(node.childNodes.length>0){
+					for (var i = node.childNodes.length - 1; i >= 0; i--) {
+						if(node.childNodes[i].classList){
+							if(node.childNodes[i].classList.contains("node")){
+								updateLine(node.childNodes[i]);
+							}
+						}
+					}
+				}
+
+			}
+
+			scanNodes();
+			addLines();
+
+			
+
+			document.addEventListener('mousedown', onDocumentMouseDown, false);
+			document.addEventListener('mousemove', onDocumentMouseMove, false);
+			document.addEventListener('mouseup', onDocumentMouseUp, false);
+
+			document.addEventListener('dblclick', onDocumentDoubleClick, false);
+
+			document.addEventListener('touchstart', onDocumentTouchStart, false);
+			document.addEventListener('touchmove', onDocumentTouchMove, false);
+			document.addEventListener('touchend', onDocumentTouchEnd, false);
+
+			document.addEventListener('keydown', onDocumentKeyDown, false);
+
+			document.addEventListener('blur', onDocumentBlur, true);
+
+			document.addEventListener('contextmenu', onContextMenu, false);
+
+			document.addEventListener('mouseover', onMouseOver, false);
+
+
+
+			window.addEventListener('resize', onDocumentResize, false);
+
+			function onContextMenu(event){
+				event.preventDefault();
+			}
+
+
+			function onMouseOver(event){
+				//console.log("mouseOver", event.target);
+			}
+
+			function attachNodeToParent(child, parent){
+				console.log("attachNodeToParent");
+				//var box1 = parent.getBoundingClientRect();
+					//console.log("old:", box1.left, box1.top);
+				parent.appendChild(child);
+				//var box2 = node.getBoundingClientRect();
+					//console.log("new:", box2.left, box2.top);
+				lines[Number(child.id)].show();
+				child.style.left = 0;//(((box1.left)/window.innerWidth)*100) + "%";
+				child.style.top = 50 + "px";//(((box1.top)/window.innerHeight)*100) + "%";
+				updateLine(child);
+			}
+
+
+			function onDocumentKeyDown(event){
+				//console.log("keydown", event.key, event.target);
+				if (event.target.classList.contains("nodetitleinput")){
+					if(event.key == "Enter"){
+    					//finishEditNode(event.target);
+    					event.target.blur();
+    				}
+    				
+				} else {
+					if(event.key == "s"){
+    					
+    					if(event.getModifierState("Control")){
+    						event.preventDefault();
+							console.log("SAVE KEYS PRESSED");
+							saveTextAsFile();
+    					}
+    					
+    				}
+				}
+			}
+
+			function saveTextAsFile(){
+				if(user){
+				var textToWrite = document.getElementById("rootnode").outerHTML;
+				//var textFileAsBlob = new Blob([textToWrite], {type:'text/plain'});
+
+				firebase.database().ref('users/' + user.uid).set({
+    				mapDataText: textToWrite
+  				});
+			} else {
+				var textToWrite = document.getElementById("rootnode").outerHTML;
+				var textFileAsBlob = new Blob([textToWrite], {type:'text/plain'})
+
+			
+				
+				var fileNameToSaveAs = "file.txt";
+
+				var downloadLink = document.createElement("a");
+				downloadLink.download = fileNameToSaveAs;
+				downloadLink.innerHTML = "Download File";
+				if (window.webkitURL !== null)
+				{
+		// Chrome allows the link to be clicked
+		// without actually adding it to the DOM.
+		downloadLink.href = window.webkitURL.createObjectURL(textFileAsBlob);
+	}
+	else
+	{
+		// Firefox requires the link to be added to the DOM
+		// before it can be clicked.
+		downloadLink.href = window.URL.createObjectURL(textFileAsBlob);
+		downloadLink.onclick = destroyClickedElement;
+		downloadLink.style.display = "none";
+		document.body.appendChild(downloadLink);
+	}
+
+	downloadLink.click();
+}
+}
+
+function destroyClickedElement(event)
+{
+	document.body.removeChild(event.target);
+}
+
+
+			function onDocumentBlur(event){
+				console.log("blur", event.target);
+				if (event.target.classList.contains("nodetitleinput")){
+    				finishEditNode(event.target);
+
+				}
+			}
+
+			function onDocumentDoubleClick(event){
+				console.log("doubleclick");
+				if (event.target.classList.contains("nodetitle")){
+    				startEditNode(event.target);
+				}
+			}
+
+			function finishEditNode(node){
+				var textContent = node.value;//console.log("1");
+				
+				var newText = document.createElement("DIV");//console.log("2");
+				newText.setAttribute("class", "nodetitle");//console.log("3");
+				var t = document.createTextNode(textContent);//console.log("4");       // Create a text node
+				newText.appendChild(t);console.log("5");
+				node.parentNode.replaceChild (newText, node);//console.log("6");
+				updateLine(newText.parentNode);
+			}
+
+			function startEditNode(node){
+				var textContent = node.textContent;
+				//console.log(node);
+				var inputText = document.createElement("INPUT");
+				inputText.setAttribute("type", "text");
+				inputText.setAttribute("class", "nodetitleinput");
+				inputText.value = textContent;
+				node.parentNode.replaceChild (inputText, node);
+				inputText.focus();
+			}
+
+			function onDocumentResize(event){
+				updateLine(document.getElementById("rootnode"));
+			}
+
+			function onDocumentTouchStart(event){
+				//event = event || window.event; // needed for IE??
+				//event.preventDefault();
+				//console.log(event.target.className);
+				if (event.target.classList.contains("node")){
+					pos3 = event.touches[0].clientX;
+    				pos4 = event.touches[0].clientY;
+    				startNodeDrag(event.target, 0);
+				} else if (event.target.parentNode.classList.contains("node")){
+					//event.preventDefault();
+					pos3 = event.target.parentNode.clientX;
+    				pos4 = event.target.parentNode.clientY;
+    				startNodeDrag(event.target.parentNode, 0);
+				}
+			}
+
+			function onDocumentTouchMove(event){
+				//event = event || window.event; // needed for IE??
+				//event.preventDefault();
+				if(dragging){
+					pos1 = pos3 - event.touches[0].clientX;
+    				pos2 = pos4 - event.touches[0].clientY;
+    				pos3 = event.touches[0].clientX;
+    				pos4 = event.touches[0].clientY;
+    				nodeDrag(dragged.parentNode.id == "rootnode");
+				}
+			}
+
+			function onDocumentTouchEnd(event){
+				//event = event || window.event; // needed for IE??
+				//event.preventDefault();
+				if(dragging){
+					stopNodeDrag();
+				}
+			}
+
+			function onDocumentMouseDown(event){
+				//console.log("mousedown", event.target);
+				//console.log(event.target);
+				//event = event || window.event; // needed for IE??
+				if (!event.target.classList.contains("nodetitleinput")){
+					if (event.target.classList.contains("node")){
+						event.preventDefault();
+						pos3 = event.clientX;
+    					pos4 = event.clientY;
+    					startNodeDrag(event.target, event.button);
+    					
+					} else if (event.target.parentNode.classList.contains("node")){
+						event.preventDefault();
+						pos3 = event.clientX;
+    					pos4 = event.clientY;
+    					startNodeDrag(event.target.parentNode, event.button);
+					} else if (event.target.parentNode.id == "drawing"){
+						if(event.button == 2){
+							pos3 = event.clientX;
+    					pos4 = event.clientY;
+							addNewNode(event.clientX, event.clientY);
+						}
+					}
+				}
+			}
+
+			function addNewNode(x, y){
+				var newNode = createNode();
+				document.getElementById("rootnode").appendChild(newNode);
+				nodesArray.push(newNode);
+				addLine(nodesArray.length-1);
+				newNode.style.left = x-10 + "px";
+				newNode.style.top = y-10 + "px";
+				startNodeDrag(newNode, 2);
+			}
+
+			function createNode(){
+				var newText = document.createElement("DIV");
+				var newNode = document.createElement("DIV");
+				newText.setAttribute("class", "nodetitle");
+				newNode.setAttribute("class", "node");
+				newNode.setAttribute("id", nodesArray.length);
+				var t = document.createTextNode("Blank");
+				newText.appendChild(t);
+				newNode.appendChild(newText);
+				return newNode;
+			}
+
+			function onDocumentMouseMove(event){
+				//event = event || window.event; // needed for IE??
+				
+				if(dragging){
+					event.preventDefault();
+					//console.log(event.target);
+					pos1 = pos3 - event.clientX;
+    				pos2 = pos4 - event.clientY;
+    				pos3 = event.clientX;
+    				pos4 = event.clientY;
+    				nodeDrag(dragged.parentNode.id == "rootnode");
+				}
+			}
+
+			function onDocumentMouseUp(event){
+				//console.log("mouseup");
+				//event = event || window.event; // needed for IE??
+				
+				if(dragging){
+					event.preventDefault();
+					if(detached){
+					//console.log("drop-carrying");
+
+					dragged.hidden = true;
+					var elemBelow = document.elementFromPoint(event.clientX, event.clientY);
+					dragged.hidden = false;
+
+					if (elemBelow.classList.contains("node")){
+    					attachNodeToParent(dragged, elemBelow);
+					} else if (elemBelow.parentNode.classList.contains("node")){
+
+    					attachNodeToParent(dragged, elemBelow.parentNode);
+					}
+				}
+					
+  					
+  					
+
+					stopNodeDrag();
+				}
+			}
+
+			function startNodeDrag(node, button){
+				
+				dragging = true;
+				dragged = node;
+				if(dragged.parentNode.id == "rootnode"){
+					detached = true;
+				}
+				if (button==2){
+					detached = true;
+					var box1 = node.getBoundingClientRect();
+					//console.log("old:", box1.left, box1.top);
+					document.getElementById("rootnode").appendChild(node);
+					var box2 = node.getBoundingClientRect();
+					//console.log("new:", box2.left, box2.top);
+					lines[Number(node.id)].hide();
+					node.style.left = (((box1.left)/window.innerWidth)*100) + "%";
+					node.style.top = (((box1.top)/window.innerHeight)*100) + "%";
+				}
+				//node.style.cursor = "move";
+			}
+
+			function nodeDrag(proportional){
+				
+				//console.log(dragged.parentNode.id);
+				//console.log("nodeDrag", pos1, pos2, pos3, pos4);
+				if(proportional){
+					//console.log("proportional")
+					
+    				//console.log(dragged.offsetLeft, pos1, dragged.offsetLeft - pos1, (((dragged.offsetLeft - pos1)/window.innerWidth)*100));
+
+    				dragged.style.top = (dragged.offsetTop - pos2) + "px";
+    				dragged.style.left = (dragged.offsetLeft - pos1) + "px";
+
+    				//console.log(dragged.style.left);
+				} else{
+					dragged.style.top = (dragged.offsetTop - pos2) + "px";
+    				dragged.style.left = (dragged.offsetLeft - pos1) + "px";
+    			}
+    			updateLine(dragged);
+			}
+
+			function stopNodeDrag(){
+				//console.log("stopNodeDrag");
+				if(dragged.parentNode.id == "rootnode"){
+					dragged.style.top = (((dragged.offsetTop - pos2)/window.innerHeight)*100) + "%";
+    				dragged.style.left = (((dragged.offsetLeft - pos1)/window.innerWidth)*100) + "%";
+				}
+				dragging = false;
+				detached=false;
+				dragged = null;
+			}
+
+		</script>
+	</body>
+</html>
