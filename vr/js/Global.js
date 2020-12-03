@@ -1,7 +1,7 @@
 class Global {
     constructor() {
     	//this.depth = true;
-		this.VR = true;
+		this.VR = false;
 		this.originX = 0;
 		this.originZ = 0;
 		this.originY = 0;
