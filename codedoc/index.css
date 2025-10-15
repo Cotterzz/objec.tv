@@ -1,0 +1,140 @@
+      body {
+        font-family: "DM Mono", monospace;
+        font-size: 12px;
+        user-select: none;
+      }
+      .box {
+        width: 800px;
+        height: 300px;
+        margin: 5px;
+        padding: 5px;
+        border: 1px solid #0084ff;
+        border-radius: 1px;
+        background: #e2f2ff;
+        resize: both;
+        overflow: auto;
+
+      }
+      #code {
+        text-wrap: nowrap;
+      }
+      #html {
+        font-size: 10px;
+      }
+      .tip  {
+        display:inline;
+        font-weight: 500;
+        font-style: italic;
+        color: #11cc11;
+      }
+      .dec {
+        cursor: default;
+        display:inline;
+        color: #000000;
+      }
+      .lev1 {
+        padding-left: 30px;
+      }
+      .lin {
+        color:#c0d0df;
+      }
+
+      .cbr {
+        display:inline;
+        color: #000000;
+      }
+      .rbr {
+        display:inline;
+      }
+      .new {
+        display:inline;
+        color:#c0d0df;
+      }
+      .arg {
+        
+        display:inline;
+      }
+      .cod {
+        display:inline;
+        
+      }
+      .fun {
+        
+        display:inline;
+        font-weight: 400;
+        font-style: normal;
+        color: #000000;
+      }
+      .nam {
+        display:inline;
+        font-weight: 500;
+        font-style: normal;
+        color: #000000;
+      }
+      .nna {
+        display:inline;
+        font-weight: 500;
+        font-style: normal;
+        color: #005500;
+      }
+      .m33 {
+        display:inline;
+        font-weight: 500;
+        font-style: normal;
+        color: #5900ac;
+      }
+      .int {
+        display:inline;
+        font-weight: 300;
+        font-style: normal;
+        color: #0000ff;
+      }
+      .qua {
+        display:inline;
+        font-weight: 300;
+        font-style: normal;
+        color: #5900ac;
+      }
+      .typ {
+        display:inline;
+        font-weight: 500;
+        font-style: normal;
+        color: #5900ac;
+      }
+      .com {
+        display:inline;
+        font-weight: 300;
+        font-style: italic;
+        color: #a1a1a1;
+      }
+      .asg {
+        display:inline;
+        color: #000000;
+      }
+      .exp {
+        display:inline;
+        color: #000000;
+      }
+      .prc {
+        display:inline;
+        color: #0000ff;
+      }
+      .prp {
+        display:inline;
+        color: #550000;
+      }
+      .sta {
+        display:inline;
+        color: #0000ff;
+        font-size: 18px;
+        cursor:
+        url("cursor.png") 8 8,
+        grab;
+      }
+      /* placeholder, this comes later in the css as it overrides type, eg int phldr would be styled as a placeholder */
+      .phld {
+        display:inline;
+        font-weight: 300;
+        font-style: italic;
+        color: #22aaaa;
+      }

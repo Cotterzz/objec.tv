@@ -1,0 +1,2509 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gesture-Based Structured Code Editor - GLSL</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <div class="header">
+            <h1>⚡ Gesture-Based Structured Code Editor</h1>
+            <div class="header-controls">
+                <button class="btn" id="btn-theme">🌓 Theme</button>
+                <button class="btn" id="btn-clear">Clear</button>
+                <button class="btn" id="btn-export">Export GLSL</button>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Code Editor Panel -->
+            <div class="code-panel">
+                <div class="panel-header">Editor - Build your GLSL shader</div>
+                <div class="code-area" id="editor"></div>
+            </div>
+
+            <!-- Output Panel -->
+            <div class="output-panel">
+                <div class="panel-header">GLSL Output</div>
+                <div class="output-content" id="output"></div>
+                <div class="info-box">
+                    <strong>How to use:</strong><br>
+                    • Click <span style="color: #a78bfa;">⮊</span> holes to add code<br>
+                    • Drag numbers to adjust values<br>
+                    &nbsp;&nbsp;← Left: smaller magnitude (÷10)<br>
+                    &nbsp;&nbsp;→ Right: larger magnitude (×10)<br>
+                    &nbsp;&nbsp;↑ Up: increase coefficient<br>
+                    &nbsp;&nbsp;↓ Down: decrease coefficient<br>
+                    • Build complete programs gesture-by-gesture
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        // ========================================
+        // USER SETTINGS - Persistent configuration
+        // ========================================
+        
+        const UserSettings = {
+            settings: {
+                theme: 'dark',
+                // Future settings: fontSize, autoSave, etc.
+            },
+            
+            load() {
+                const stored = localStorage.getItem('editorSettings');
+                if (stored) {
+                    try {
+                        this.settings = { ...this.settings, ...JSON.parse(stored) };
+                    } catch (e) {
+                        console.warn('Failed to load settings, using defaults');
+                    }
+                }
+                this.apply();
+            },
+            
+            save() {
+                localStorage.setItem('editorSettings', JSON.stringify(this.settings));
+            },
+            
+            apply() {
+                // Apply theme
+                document.body.className = `theme-${this.settings.theme}`;
+                
+                // Future: apply other settings
+            },
+            
+            set(key, value) {
+                this.settings[key] = value;
+                this.save();
+                this.apply();
+            },
+            
+            get(key) {
+                return this.settings[key];
+            },
+            
+            toggleTheme() {
+                const newTheme = this.settings.theme === 'dark' ? 'light' : 'dark';
+                this.set('theme', newTheme);
+                return newTheme;
+            }
+        };
+
+        // ========================================
+        // ALL COLORS NOW IN styles.css VIA CSS VARIABLES
+        // ========================================
+
+        // ========================================
+        // MODEL LAYER - Semantic DOM Node Creation
+        // ========================================
+
+        const NodeFactory = {
+            // Create an interaction point (typed hole)
+            // hint: semantic context ('mutation', 'condition', 'value') to filter choices
+            createHole(contextType, expectedType = 'any', scope = null, mode = null, hint = null) {
+                const el = document.createElement('span');
+                el.dataset.nodeType = 'hole';
+                el.dataset.contextType = contextType;
+                el.dataset.expectedType = expectedType;
+                el.dataset.scope = JSON.stringify(scope || this.getEmptyScope());
+                if (mode) el.dataset.mode = mode; // 'select-existing', 'create-new', 'loop-iterator'
+                if (hint) el.dataset.hint = hint; // 'mutation', 'condition', 'value'
+                el.className = 'hole';
+                el.textContent = '⮊';
+                el.title = `${contextType} hole${expectedType !== 'any' ? ` (expects ${expectedType})` : ''}`;
+                return el;
+            },
+
+            // Create a function declaration
+            createFunctionDecl(returnType, name, params = [], body = []) {
+                const wrapper = document.createElement('div');
+                wrapper.className = 'node-line';
+                
+                const el = document.createElement('div');
+                el.dataset.nodeType = 'function-decl';
+                el.dataset.returnType = returnType;
+                el.dataset.name = name;
+                el.className = 'node-function';
+
+                // Header
+                const header = document.createElement('div');
+                header.dataset.role = 'header';
+                header.className = 'func-header';
+                
+                const typeSpan = document.createElement('span');
+                typeSpan.className = 'type-keyword';
+                typeSpan.textContent = returnType;
+                
+                const nameSpan = document.createElement('span');
+                nameSpan.className = 'func-name';
+                nameSpan.textContent = ' ' + name;
+                
+                const paramsSpan = document.createElement('span');
+                paramsSpan.className = 'punctuation';
+                paramsSpan.textContent = '()';
+                
+                const braceSpan = document.createElement('span');
+                braceSpan.className = 'punctuation';
+                braceSpan.textContent = ' {';
+                
+                header.appendChild(typeSpan);
+                header.appendChild(nameSpan);
+                header.appendChild(paramsSpan);
+                header.appendChild(braceSpan);
+
+                // Body
+                const bodyEl = document.createElement('div');
+                bodyEl.dataset.role = 'body';
+                bodyEl.className = 'func-body';
+                
+                body.forEach(stmt => bodyEl.appendChild(stmt));
+
+                // Closing brace
+                const closingBrace = document.createElement('div');
+                closingBrace.className = 'punctuation';
+                closingBrace.textContent = '}';
+
+                el.appendChild(header);
+                el.appendChild(bodyEl);
+                el.appendChild(closingBrace);
+                
+                wrapper.appendChild(el);
+                return wrapper;
+            },
+
+            // Create a variable declaration
+            createVarDecl(typeHole, nameHole, initializer = null) {
+                const wrapper = document.createElement('div');
+                wrapper.className = 'node-line';
+                
+                const el = document.createElement('div');
+                el.dataset.nodeType = 'var-decl';
+
+                el.appendChild(typeHole);
+                el.appendChild(document.createTextNode(' '));
+                el.appendChild(nameHole);
+                
+                if (initializer) {
+                    const eq = document.createElement('span');
+                    eq.className = 'operator';
+                    eq.textContent = '=';
+                    el.appendChild(document.createTextNode(' '));
+                    el.appendChild(eq);
+                    el.appendChild(document.createTextNode(' '));
+                    el.appendChild(initializer);
+                }
+                
+                const semi = document.createElement('span');
+                semi.className = 'punctuation';
+                semi.textContent = ';';
+                el.appendChild(semi);
+                
+                wrapper.appendChild(el);
+                return wrapper;
+            },
+
+            // Create an assignment statement
+            createAssignment(targetHole, valueHole) {
+                const wrapper = document.createElement('div');
+                wrapper.className = 'node-line';
+                
+                const el = document.createElement('div');
+                el.dataset.nodeType = 'assignment';
+
+                el.appendChild(targetHole);
+                
+                const eq = document.createElement('span');
+                eq.className = 'operator';
+                eq.textContent = '=';
+                el.appendChild(document.createTextNode(' '));
+                el.appendChild(eq);
+                el.appendChild(document.createTextNode(' '));
+                
+                el.appendChild(valueHole);
+                
+                const semi = document.createElement('span');
+                semi.className = 'punctuation';
+                semi.textContent = ';';
+                el.appendChild(semi);
+                
+                wrapper.appendChild(el);
+                return wrapper;
+            },
+
+            // Create a number literal (interactive)
+            createNumber(value, type) {
+                const el = document.createElement('span');
+                el.dataset.nodeType = 'number';
+                el.dataset.value = value.toString();
+                el.dataset.glslType = type || 'float';
+                el.className = 'number-literal';
+                
+                // Format based on type
+                const formatted = this.formatNumberByType(value, type || 'float');
+                el.textContent = formatted;
+                el.title = `Drag to adjust ${type} value`;
+                return el;
+            },
+
+            // Create a bool literal
+            createBoolLiteral(value) {
+                const el = document.createElement('span');
+                el.dataset.nodeType = 'bool-literal';
+                el.dataset.value = value.toString();
+                el.className = 'bool-literal';
+                el.textContent = value ? 'true' : 'false';
+                // Color handled by CSS via .bool-literal class
+                return el;
+            },
+
+            // Format number based on GLSL type
+            formatNumberByType(value, type) {
+                if (type === 'int') {
+                    // Integers: no decimal point
+                    return Math.floor(value).toString();
+                } else {
+                    // Floats: must have decimal point
+                    const num = parseFloat(value);
+                    if (Number.isInteger(num)) {
+                        return num.toString() + '.0';
+                    }
+                    return num.toString();
+                }
+            },
+
+            // Create a type node
+            createType(typeName) {
+                const el = document.createElement('span');
+                el.dataset.nodeType = 'type';
+                el.dataset.typeName = typeName;
+                el.className = 'type-keyword';
+                el.textContent = typeName;
+                return el;
+            },
+
+            // Create an identifier node
+            createIdentifier(name, type = null) {
+                const el = document.createElement('span');
+                el.dataset.nodeType = 'identifier';
+                el.dataset.name = name;
+                el.className = 'var-name';
+                if (type) {
+                    el.dataset.varType = type;
+                }
+                el.textContent = name;
+                // Color handled by CSS via [data-var-type] selector
+                return el;
+            },
+
+            // Create a variable reference
+            createVarRef(name, type) {
+                const el = document.createElement('span');
+                el.dataset.nodeType = 'var-ref';
+                el.dataset.varName = name;
+                el.dataset.varType = type;
+                el.className = 'var-name';
+                el.textContent = name;
+                // Color handled by CSS via [data-var-type] selector
+                return el;
+            },
+
+            // Create a binary operation
+            createBinaryOp(leftHole, operatorHole, rightHole, expectedType) {
+                const el = document.createElement('span');
+                el.dataset.nodeType = 'binary-op';
+                el.dataset.expectedType = expectedType;
+                
+                el.appendChild(document.createTextNode('('));
+                el.appendChild(leftHole);
+                el.appendChild(document.createTextNode(' '));
+                el.appendChild(operatorHole);
+                el.appendChild(document.createTextNode(' '));
+                el.appendChild(rightHole);
+                el.appendChild(document.createTextNode(')'));
+                
+                return el;
+            },
+
+            // Create an operator selection hole
+            // Create an operator (with default value, draggable to change)
+            createOperator(op, mode = 'math') {
+                const el = document.createElement('span');
+                el.dataset.nodeType = 'operator';
+                el.dataset.operator = op;
+                el.dataset.mode = mode; // 'math' or 'comparison'
+                el.className = 'operator';
+                el.textContent = op;
+                return el;
+            },
+
+            // Create an increment expression (e.g., i++)
+            createIncrement(varName, varType = 'int') {
+                const container = document.createElement('span');
+                container.className = 'increment-expr';
+                container.dataset.nodeType = 'increment';
+                container.dataset.returnType = varType;
+                
+                // Important: Don't set data-node-type on children, so they're treated as display-only
+                const varSpan = document.createElement('span');
+                varSpan.className = 'identifier';
+                varSpan.textContent = varName;
+                
+                const opSpan = document.createElement('span');
+                opSpan.className = 'operator';
+                opSpan.textContent = '++';
+                
+                container.appendChild(varSpan);
+                container.appendChild(opSpan);
+                
+                return container;
+            },
+
+            // Create a function call
+            createFunctionCall(functionName, returnType, paramHoles) {
+                const el = document.createElement('span');
+                el.dataset.nodeType = 'function-call';
+                el.dataset.functionName = functionName;
+                el.dataset.returnType = returnType;
+                el.className = 'func-name';
+                
+                el.textContent = functionName;
+                el.appendChild(document.createTextNode('('));
+                
+                paramHoles.forEach((paramHole, index) => {
+                    if (index > 0) {
+                        const comma = document.createElement('span');
+                        comma.className = 'punctuation';
+                        comma.textContent = ', ';
+                        el.appendChild(comma);
+                    }
+                    el.appendChild(paramHole);
+                });
+                
+                el.appendChild(document.createTextNode(')'));
+                
+                return el;
+            },
+
+            // Get next available iterator name (i, j, k, l, m, n)
+            getNextIteratorName(scope) {
+                const reservedNames = ['i', 'j', 'k', 'l', 'm', 'n'];
+                const usedNames = new Set((scope.variables || []).map(v => v.name));
+                return reservedNames.find(name => !usedNames.has(name)) || 'i';
+            },
+
+            // Create a for loop with different templates
+            createForLoop(scope, template = 'custom') {
+                const wrapper = document.createElement('div');
+                wrapper.className = 'node-line';
+                
+                const el = document.createElement('div');
+                el.dataset.nodeType = 'for-loop';
+                el.className = 'control-flow';
+
+                const header = document.createElement('div');
+                header.dataset.role = 'header';
+                header.className = 'for-header';
+                
+                const forKeyword = document.createElement('span');
+                forKeyword.className = 'keyword';
+                forKeyword.textContent = 'for';
+                
+                const openParen = document.createElement('span');
+                openParen.className = 'punctuation';
+                openParen.textContent = ' (';
+                
+                header.appendChild(forKeyword);
+                header.appendChild(openParen);
+
+                // Build different templates
+                if (template === 'simple') {
+                    // for(int i = 0; i < N; i++) - only one hole for the limit
+                    const iteratorName = this.getNextIteratorName(scope);
+                    
+                    const initType = document.createElement('span');
+                    initType.className = 'type-keyword';
+                    initType.textContent = 'int';
+                    
+                    const iteratorId = this.createIdentifier(iteratorName);
+                    
+                    const eq = document.createElement('span');
+                    eq.className = 'operator';
+                    eq.textContent = ' = ';
+                    
+                    const zero = this.createNumber(0, 'int');
+                    
+                    const semi1 = document.createElement('span');
+                    semi1.className = 'punctuation';
+                    semi1.textContent = '; ';
+                    
+                    const condVar = document.createElement('span');
+                    condVar.className = 'identifier';
+                    condVar.textContent = iteratorName;
+                    
+                    const ltOp = document.createElement('span');
+                    ltOp.className = 'operator';
+                    ltOp.textContent = ' < ';
+                    
+                    const limitHole = this.createHole('expression', 'int', scope, null, 'value');
+                    
+                    const semi2 = document.createElement('span');
+                    semi2.className = 'punctuation';
+                    semi2.textContent = '; ';
+                    
+                    const incExpr = this.createIncrement(iteratorName, 'int');
+                    
+                    header.appendChild(initType);
+                    header.appendChild(document.createTextNode(' '));
+                    header.appendChild(iteratorId);
+                    header.appendChild(eq);
+                    header.appendChild(zero);
+                    header.appendChild(semi1);
+                    header.appendChild(condVar);
+                    header.appendChild(ltOp);
+                    header.appendChild(limitHole);
+                    header.appendChild(semi2);
+                    header.appendChild(incExpr);
+                    
+                } else if (template === 'flexible') {
+                    // for(int i = 0; i [op] N; i [mutation]) - holes for operator and mutation
+                    const iteratorName = this.getNextIteratorName(scope);
+                    
+                    const initType = document.createElement('span');
+                    initType.className = 'type-keyword';
+                    initType.textContent = 'int';
+                    
+                    const iteratorId = this.createIdentifier(iteratorName);
+                    
+                    const eq = document.createElement('span');
+                    eq.className = 'operator';
+                    eq.textContent = ' = ';
+                    
+                    const zero = this.createNumber(0, 'int');
+                    
+                    const semi1 = document.createElement('span');
+                    semi1.className = 'punctuation';
+                    semi1.textContent = '; ';
+                    
+                    const condVar = document.createElement('span');
+                    condVar.className = 'identifier';
+                    condVar.textContent = iteratorName;
+                    
+                    const opNode = this.createOperator('<', 'comparison');
+                    
+                    const limitHole = this.createHole('expression', 'int', scope, null, 'value');
+                    
+                    const semi2 = document.createElement('span');
+                    semi2.className = 'punctuation';
+                    semi2.textContent = '; ';
+                    
+                    const incHole = this.createHole('expression', 'any', scope, null, 'mutation');
+                    
+                    header.appendChild(initType);
+                    header.appendChild(document.createTextNode(' '));
+                    header.appendChild(iteratorId);
+                    header.appendChild(eq);
+                    header.appendChild(zero);
+                    header.appendChild(semi1);
+                    header.appendChild(condVar);
+                    header.appendChild(document.createTextNode(' '));
+                    header.appendChild(opNode);
+                    header.appendChild(document.createTextNode(' '));
+                    header.appendChild(limitHole);
+                    header.appendChild(semi2);
+                    header.appendChild(incHole);
+                    
+                } else if (template === 'float') {
+                    // for(float t = [start]; t [op] [end]; t += [step])
+                    const iteratorName = this.getNextIteratorName(scope);
+                    
+                    const initType = document.createElement('span');
+                    initType.className = 'type-keyword';
+                    initType.textContent = 'float';
+                    
+                    const iteratorId = this.createIdentifier(iteratorName);
+                    
+                    const eq = document.createElement('span');
+                    eq.className = 'operator';
+                    eq.textContent = ' = ';
+                    
+                    const startVal = this.createHole('expression', 'float', scope, null, 'value');
+                    
+                    const semi1 = document.createElement('span');
+                    semi1.className = 'punctuation';
+                    semi1.textContent = '; ';
+                    
+                    const condVar = document.createElement('span');
+                    condVar.className = 'identifier';
+                    condVar.textContent = iteratorName;
+                    
+                    const opNode = this.createOperator('<', 'comparison');
+                    
+                    const limitHole = this.createHole('expression', 'float', scope, null, 'value');
+                    
+                    const semi2 = document.createElement('span');
+                    semi2.className = 'punctuation';
+                    semi2.textContent = '; ';
+                    
+                    const incHole = this.createHole('expression', 'any', scope, null, 'mutation');
+                    
+                    header.appendChild(initType);
+                    header.appendChild(document.createTextNode(' '));
+                    header.appendChild(iteratorId);
+                    header.appendChild(eq);
+                    header.appendChild(startVal);
+                    header.appendChild(semi1);
+                    header.appendChild(condVar);
+                    header.appendChild(document.createTextNode(' '));
+                    header.appendChild(opNode);
+                    header.appendChild(document.createTextNode(' '));
+                    header.appendChild(limitHole);
+                    header.appendChild(semi2);
+                    header.appendChild(incHole);
+                    
+                } else {
+                    // Custom/free-form: full control over everything
+                    const initType = document.createElement('span');
+                    initType.className = 'type-keyword';
+                    initType.textContent = 'int';
+                    
+                    const iteratorName = this.createHole('identifier', 'int', scope, 'loop-iterator');
+                    
+                    const eq1 = document.createElement('span');
+                    eq1.className = 'operator';
+                    eq1.textContent = ' = ';
+                    
+                    const initValue = this.createHole('expression', 'int', scope);
+                    
+                    const semi1 = document.createElement('span');
+                    semi1.className = 'punctuation';
+                    semi1.textContent = '; ';
+                    
+                    const conditionHole = this.createHole('expression', 'bool', scope, null, 'condition');
+                    
+                    const semi2 = document.createElement('span');
+                    semi2.className = 'punctuation';
+                    semi2.textContent = '; ';
+                    
+                    const incrementHole = this.createHole('expression', 'any', scope, null, 'mutation');
+                    
+                    header.appendChild(initType);
+                    header.appendChild(document.createTextNode(' '));
+                    header.appendChild(iteratorName);
+                    header.appendChild(eq1);
+                    header.appendChild(initValue);
+                    header.appendChild(semi1);
+                    header.appendChild(conditionHole);
+                    header.appendChild(semi2);
+                    header.appendChild(incrementHole);
+                }
+                
+                const closeParen = document.createElement('span');
+                closeParen.className = 'punctuation';
+                closeParen.textContent = ')';
+                
+                const openBrace = document.createElement('span');
+                openBrace.className = 'punctuation';
+                openBrace.textContent = ' {';
+                
+                header.appendChild(closeParen);
+                header.appendChild(openBrace);
+
+                // Body
+                const bodyEl = document.createElement('div');
+                bodyEl.dataset.role = 'body';
+                bodyEl.className = 'func-body';
+                bodyEl.appendChild(this.createHole('statement', 'any', scope));
+
+                // Closing brace
+                const closingBrace = document.createElement('div');
+                closingBrace.className = 'punctuation';
+                closingBrace.textContent = '}';
+
+                el.appendChild(header);
+                el.appendChild(bodyEl);
+                el.appendChild(closingBrace);
+                
+                wrapper.appendChild(el);
+                return wrapper;
+            },
+
+            // Create an if statement
+            createIfStatement(scope) {
+                const wrapper = document.createElement('div');
+                wrapper.className = 'node-line';
+                
+                const el = document.createElement('div');
+                el.dataset.nodeType = 'if-statement';
+                el.className = 'control-flow';
+
+                // Header: if (condition)
+                const header = document.createElement('div');
+                header.dataset.role = 'header';
+                header.className = 'if-header';
+                
+                const ifKeyword = document.createElement('span');
+                ifKeyword.className = 'keyword';
+                ifKeyword.textContent = 'if';
+                
+                const openParen = document.createElement('span');
+                openParen.className = 'punctuation';
+                openParen.textContent = ' (';
+                
+                const conditionHole = this.createHole('expression', 'bool', scope);
+                
+                const closeParen = document.createElement('span');
+                closeParen.className = 'punctuation';
+                closeParen.textContent = ')';
+                
+                const openBrace = document.createElement('span');
+                openBrace.className = 'punctuation';
+                openBrace.textContent = ' {';
+                
+                header.appendChild(ifKeyword);
+                header.appendChild(openParen);
+                header.appendChild(conditionHole);
+                header.appendChild(closeParen);
+                header.appendChild(openBrace);
+
+                // Body
+                const bodyEl = document.createElement('div');
+                bodyEl.dataset.role = 'body';
+                bodyEl.className = 'func-body';
+                bodyEl.appendChild(this.createHole('statement', 'any', scope));
+
+                // Closing brace
+                const closingBrace = document.createElement('div');
+                closingBrace.className = 'punctuation';
+                closingBrace.textContent = '}';
+
+                el.appendChild(header);
+                el.appendChild(bodyEl);
+                el.appendChild(closingBrace);
+                
+                wrapper.appendChild(el);
+                return wrapper;
+            },
+
+            getEmptyScope() {
+                return {
+                    variables: [],
+                    functions: [],
+                    types: ['void', 'float', 'vec2', 'vec3', 'vec4', 'int', 'bool', 'mat2', 'mat3', 'mat4']
+                };
+            }
+        };
+
+        // ========================================
+        // SCOPE MANAGEMENT
+        // ========================================
+
+        const ScopeManager = {
+            // Walk up the DOM tree and collect scope information
+            getCurrentScope(element) {
+                const scope = {
+                    variables: [],
+                    functions: [],
+                    types: ['void', 'float', 'vec2', 'vec3', 'vec4', 'int', 'bool', 'mat2', 'mat3', 'mat4']
+                };
+
+                // Helper to collect from a node
+                const collectFromNode = (node) => {
+                    if (!node || !node.dataset) return;
+                    
+                    // Collect variable declarations
+                    if (node.dataset.nodeType === 'var-decl') {
+                        const typeNode = node.querySelector('[data-node-type="type"]');
+                        const nameNode = node.querySelector('[data-node-type="identifier"]');
+                        
+                        if (typeNode && nameNode) {
+                            scope.variables.push({
+                                name: nameNode.dataset.name,
+                                type: typeNode.dataset.typeName
+                            });
+                        }
+                    }
+
+                    // Collect for-loop iterator variables
+                    if (node.dataset.nodeType === 'for-loop') {
+                        const header = node.querySelector('[data-role="header"]');
+                        if (header) {
+                            const iteratorNode = header.querySelector('[data-node-type="identifier"]');
+                            if (iteratorNode) {
+                                scope.variables.push({
+                                    name: iteratorNode.dataset.name,
+                                    type: 'int' // For loop iterators are always int
+                                });
+                            }
+                        }
+                    }
+
+                    // Collect function declarations
+                    if (node.dataset.nodeType === 'function-decl') {
+                        scope.functions.push({
+                            name: node.dataset.name,
+                            returnType: node.dataset.returnType
+                        });
+                    }
+                };
+
+                // First, collect from all previous siblings at the same level
+                let current = element;
+                while (current) {
+                    let sibling = current.previousSibling;
+                    while (sibling) {
+                        // Look inside wrapper divs (node-line)
+                        if (sibling.nodeType === 1) { // ELEMENT_NODE
+                            collectFromNode(sibling);
+                            // Also check children of wrappers
+                            const varDecl = sibling.querySelector('[data-node-type="var-decl"]');
+                            if (varDecl) collectFromNode(varDecl);
+                        }
+                        sibling = sibling.previousSibling;
+                    }
+                    
+                    // Move up to parent
+                    current = current.parentElement;
+                    if (!current || current === document.body) break;
+                    
+                    // Collect from parent if it's a declaration
+                    collectFromNode(current);
+                }
+
+                return scope;
+            },
+
+            // Update all holes in the document with current scope
+            updateAllHoles() {
+                const holes = document.querySelectorAll('[data-node-type="hole"]');
+                holes.forEach(hole => {
+                    const scope = this.getCurrentScope(hole);
+                    hole.dataset.scope = JSON.stringify(scope);
+                });
+            }
+        };
+
+        // ========================================
+        // CHOICE GENERATION
+        // ========================================
+
+        const ChoiceGenerator = {
+            getChoices(hole) {
+                const contextType = hole.dataset.contextType;
+                const expectedType = hole.dataset.expectedType;
+                // IMPORTANT: Calculate scope dynamically when hole is clicked, not from frozen dataset
+                // This ensures for loop conditions see the iterator variable after it's named
+                const scope = ScopeManager.getCurrentScope(hole);
+                const mode = hole.dataset.mode || null;
+                const hint = hole.dataset.hint || null; // 'mutation', 'condition', 'value'
+
+                switch (contextType) {
+                    case 'statement':
+                        return this.getStatementChoices(scope);
+                    case 'expression':
+                        return this.getExpressionChoices(expectedType, scope, hint);
+                    case 'type':
+                        return this.getTypeChoices(scope);
+                    case 'identifier':
+                        return this.getIdentifierChoices(expectedType, scope, mode);
+                    // Operators no longer use choice picker - they use OperatorGesture
+                    default:
+                        return [];
+                }
+            },
+
+            getStatementChoices(scope) {
+                const choices = [
+                    { 
+                        type: 'var-decl-menu', 
+                        label: 'Declare Variable', 
+                        icon: '📦',
+                        submenu: [
+                            { type: 'var-decl', label: 'int', icon: '🔢', varType: 'int' },
+                            { type: 'var-decl', label: 'float', icon: '⚡', varType: 'float' },
+                            { type: 'var-decl', label: 'vec2', icon: '➡️', varType: 'vec2' },
+                            { type: 'var-decl', label: 'vec3', icon: '🔺', varType: 'vec3' },
+                            { type: 'var-decl', label: 'vec4', icon: '⬛', varType: 'vec4' },
+                            { type: 'var-decl', label: 'bool', icon: '✓', varType: 'bool' }
+                        ]
+                    }
+                ];
+                
+                // Only show assignment if there are variables in scope
+                if (scope.variables && scope.variables.length > 0) {
+                    choices.push({ type: 'assignment', label: 'Assignment', icon: '=' });
+                }
+                
+                // Control flow - for loops with templates (hierarchical)
+                choices.push({
+                    type: 'for-loop-menu',
+                    label: 'For Loop',
+                    icon: '🔁',
+                    submenu: [
+                        { type: 'for-loop-simple', label: 'Simple (i < N)', icon: '🔁', template: 'simple' },
+                        { type: 'for-loop-flexible', label: 'Flexible (int)', icon: '🔁', template: 'flexible' },
+                        { type: 'for-loop-float', label: 'Float Loop', icon: '🔁', template: 'float' },
+                        { type: 'for-loop-custom', label: 'Custom', icon: '🔁', template: 'custom' }
+                    ]
+                });
+                
+                choices.push(
+                    { type: 'if-statement', label: 'If Statement', icon: '❓' },
+                    { type: 'return', label: 'Return', icon: '↩️' },
+                    { type: 'comment', label: 'Comment', icon: '💬' }
+                );
+                
+                return choices;
+            },
+
+            getExpressionChoices(expectedType, scope, hint = null) {
+                const choices = [];
+                const numericTypes = ['float', 'int', 'vec2', 'vec3', 'vec4', 'any'];
+
+                // Filter based on semantic hint
+                const isMutationContext = hint === 'mutation';
+                const isConditionContext = hint === 'condition';
+                const isValueContext = hint === 'value' || hint === null; // default to value
+
+                // Add variables of matching type (value, not mutation)
+                if (!isMutationContext && scope.variables) {
+                    scope.variables
+                        .filter(v => this.isTypeCompatible(v.type, expectedType))
+                        .forEach(v => {
+                            choices.push({
+                                type: 'var-ref',
+                                label: v.name,
+                                icon: '📌',
+                                data: v
+                            });
+                        });
+                }
+
+                // Add increment operator for integer variables (mutation only)
+                if ((isMutationContext || expectedType === 'any') && scope.variables) {
+                    const intVars = scope.variables.filter(v => v.type === 'int');
+                    intVars.forEach(v => {
+                        choices.push({
+                            type: 'increment-select',
+                            label: `${v.name}++`,
+                            icon: '⬆️',
+                            data: v
+                        });
+                    });
+                }
+
+                // Add literal option (value, not mutation)
+                if (!isMutationContext && numericTypes.includes(expectedType)) {
+                    const literalType = this.getLiteralType(expectedType);
+                    choices.push({
+                        type: 'literal',
+                        label: `${literalType} literal`,
+                        icon: '🔢',
+                        expectedType: literalType
+                    });
+                }
+
+                // Add bool literals (true/false)
+                if (!isMutationContext && (expectedType === 'bool' || expectedType === 'any')) {
+                    choices.push({
+                        type: 'bool-literal',
+                        label: 'true',
+                        icon: '✓',
+                        value: true
+                    });
+                    choices.push({
+                        type: 'bool-literal',
+                        label: 'false',
+                        icon: '✗',
+                        value: false
+                    });
+                }
+
+                // Add binary operators (value, not mutation)
+                if (!isMutationContext && (expectedType === 'any' || numericTypes.includes(expectedType))) {
+                    choices.push({
+                        type: 'binary-op',
+                        label: 'Math (+, -, *, /)',
+                        icon: '➕',
+                        expectedType: expectedType
+                    });
+                }
+                
+                // Add comparison operators (for bool expressions or condition context)
+                if ((expectedType === 'bool' || expectedType === 'any') && !isMutationContext) {
+                    choices.push({
+                        type: 'comparison-op',
+                        label: 'Comparison (<, >, ==)',
+                        icon: '⚖️',
+                        expectedType: 'bool'
+                    });
+                }
+
+                // Add built-in functions that return the expected type (value, not mutation)
+                if (!isMutationContext) {
+                    const builtInFunctions = this.getBuiltInFunctions();
+                    builtInFunctions
+                        .filter(f => this.isTypeCompatible(f.returnType, expectedType))
+                        .forEach(f => {
+                            choices.push({
+                                type: 'function-call',
+                                label: `${f.name}(${f.params.map(p => p.type).join(', ')})`,
+                                icon: '⚡',
+                                data: f
+                            });
+                        });
+                }
+
+                return choices;
+            },
+
+            // Check if a type is compatible with the expected type
+            isTypeCompatible(actualType, expectedType) {
+                if (expectedType === 'any') return true;
+                if (actualType === expectedType) return true;
+                // Could add more complex rules here (e.g., implicit conversions)
+                return false;
+            },
+
+            // Get the appropriate literal type for an expected type
+            getLiteralType(expectedType) {
+                // For simple numeric types, use them directly
+                if (expectedType === 'int' || expectedType === 'float') {
+                    return expectedType;
+                }
+                // For vectors, use float literals (can construct vectors from floats)
+                if (expectedType.startsWith('vec') || expectedType === 'any') {
+                    return 'float';
+                }
+                return 'float'; // Default
+            },
+
+            getBuiltInFunctions() {
+                return [
+                    // Math functions
+                    { name: 'abs', returnType: 'float', params: [{type: 'float'}] },
+                    { name: 'sin', returnType: 'float', params: [{type: 'float'}] },
+                    { name: 'cos', returnType: 'float', params: [{type: 'float'}] },
+                    { name: 'tan', returnType: 'float', params: [{type: 'float'}] },
+                    { name: 'sqrt', returnType: 'float', params: [{type: 'float'}] },
+                    { name: 'pow', returnType: 'float', params: [{type: 'float'}, {type: 'float'}] },
+                    { name: 'min', returnType: 'float', params: [{type: 'float'}, {type: 'float'}] },
+                    { name: 'max', returnType: 'float', params: [{type: 'float'}, {type: 'float'}] },
+                    { name: 'clamp', returnType: 'float', params: [{type: 'float'}, {type: 'float'}, {type: 'float'}] },
+                    { name: 'mix', returnType: 'float', params: [{type: 'float'}, {type: 'float'}, {type: 'float'}] },
+                    { name: 'step', returnType: 'float', params: [{type: 'float'}, {type: 'float'}] },
+                    { name: 'smoothstep', returnType: 'float', params: [{type: 'float'}, {type: 'float'}, {type: 'float'}] },
+                    
+                    // Vector functions
+                    { name: 'dot', returnType: 'float', params: [{type: 'vec3'}, {type: 'vec3'}] },
+                    { name: 'cross', returnType: 'vec3', params: [{type: 'vec3'}, {type: 'vec3'}] },
+                    { name: 'normalize', returnType: 'vec3', params: [{type: 'vec3'}] },
+                    { name: 'length', returnType: 'float', params: [{type: 'vec3'}] },
+                    { name: 'distance', returnType: 'float', params: [{type: 'vec3'}, {type: 'vec3'}] },
+                    { name: 'reflect', returnType: 'vec3', params: [{type: 'vec3'}, {type: 'vec3'}] },
+                    
+                    // Vector constructors
+                    { name: 'vec2', returnType: 'vec2', params: [{type: 'float'}, {type: 'float'}] },
+                    { name: 'vec3', returnType: 'vec3', params: [{type: 'float'}, {type: 'float'}, {type: 'float'}] },
+                    { name: 'vec4', returnType: 'vec4', params: [{type: 'float'}, {type: 'float'}, {type: 'float'}, {type: 'float'}] },
+                ];
+            },
+
+            getTypeChoices(scope) {
+                const types = scope.types || ['float', 'vec2', 'vec3', 'vec4', 'int'];
+                return types.map(typeName => ({
+                    type: 'type-select',
+                    label: typeName,
+                    icon: this.getTypeIcon(typeName),
+                    typeName: typeName
+                }));
+            },
+
+            getIdentifierChoices(expectedType, scope, mode = null) {
+                // If mode is 'select-existing', only show existing variables
+                if (mode === 'select-existing') {
+                    if (!scope.variables || scope.variables.length === 0) {
+                        return [];
+                    }
+                    
+                    return scope.variables.map(v => ({
+                        type: 'name-select',
+                        label: v.name,
+                        icon: '📌',
+                        name: v.name
+                    }));
+                }
+                
+                // Otherwise, generate auto-numbered names for new declarations
+                const existingNames = scope.variables ? scope.variables.map(v => v.name) : [];
+                const context = mode === 'loop-iterator' ? 'loop-iterator' : null;
+                const suggestions = this.generateNameSuggestions(expectedType, existingNames, context);
+                
+                return suggestions.map(name => ({
+                    type: 'name-select',
+                    label: name,
+                    icon: '🏷️',
+                    name: name
+                }));
+            },
+
+            generateNameSuggestions(type, existingNames, context = null) {
+                // Special case for loop iterators - use i, j, k
+                if (context === 'loop-iterator') {
+                    const iteratorNames = ['i', 'j', 'k', 'n', 'm', 'idx'];
+                    const suggestions = [];
+                    
+                    for (const name of iteratorNames) {
+                        if (!existingNames.includes(name)) {
+                            suggestions.push(name);
+                            if (suggestions.length >= 3) break;
+                        }
+                    }
+                    
+                    // If we still need more, add numbered versions
+                    if (suggestions.length < 3) {
+                        let counter = 0;
+                        while (suggestions.length < 3) {
+                            const name = `i${counter}`;
+                            if (!existingNames.includes(name)) {
+                                suggestions.push(name);
+                            }
+                            counter++;
+                        }
+                    }
+                    
+                    return suggestions;
+                }
+                
+                // Regular variable names
+                const typeMap = {
+                    'float': 'myFloat',
+                    'int': 'myInt',
+                    'vec2': 'myVec2',
+                    'vec3': 'myVec3',
+                    'vec4': 'myVec4',
+                    'bool': 'myBool',
+                    'mat2': 'myMat2',
+                    'mat3': 'myMat3',
+                    'mat4': 'myMat4',
+                    'any': 'myVar'
+                };
+
+                const baseName = typeMap[type] || 'myVar';
+                const suggestions = [];
+                let counter = 0;
+
+                for (let i = 0; i < 3; i++) {
+                    let name = `${baseName}${counter}`;
+                    while (existingNames.includes(name)) {
+                        counter++;
+                        name = `${baseName}${counter}`;
+                    }
+                    suggestions.push(name);
+                    counter++;
+                }
+
+                return suggestions;
+            },
+
+            getTypeIcon(typeName) {
+                const icons = {
+                    'void': '∅',
+                    'float': '1.0',
+                    'int': '42',
+                    'bool': '✓',
+                    'vec2': 'xy',
+                    'vec3': 'xyz',
+                    'vec4': 'xyzw',
+                    'mat2': '⊞₂',
+                    'mat3': '⊞₃',
+                    'mat4': '⊞₄'
+                };
+                return icons[typeName] || '?';
+            }
+        };
+
+        // ========================================
+        // INTERACTION CONTROLLER
+        // ========================================
+
+        const InteractionController = {
+            replaceHole(hole, choice) {
+                const scope = ScopeManager.getCurrentScope(hole);
+                const expectedType = hole.dataset.expectedType;
+                const contextType = hole.dataset.contextType;
+                let newNode = null;
+
+                switch (choice.type) {
+                    case 'var-decl':
+                        // If varType is provided (from submenu), create type node directly
+                        const typeNode = choice.varType 
+                            ? NodeFactory.createType(choice.varType)
+                            : NodeFactory.createHole('type', 'any', scope);
+                        
+                        const idHole = choice.varType
+                            ? NodeFactory.createHole('identifier', 'any', scope)
+                            : NodeFactory.createHole('identifier', 'any', scope);
+                        
+                        newNode = NodeFactory.createVarDecl(typeNode, idHole, null);
+                        
+                        // Set type on var-decl for scope tracking
+                        if (choice.varType) {
+                            setTimeout(() => {
+                                const varDeclEl = idHole.closest('[data-node-type="var-decl"]');
+                                if (varDeclEl) {
+                                    varDeclEl.dataset.varType = choice.varType;
+                                    idHole.dataset.expectedType = choice.varType;
+                                }
+                            }, 0);
+                        }
+                        break;
+
+                    case 'assignment':
+                        newNode = NodeFactory.createAssignment(
+                            NodeFactory.createHole('identifier', 'any', scope, 'select-existing'),
+                            NodeFactory.createHole('expression', 'any', scope)
+                        );
+                        break;
+
+                    case 'literal':
+                        newNode = NodeFactory.createNumber(0, choice.expectedType || 'float');
+                        break;
+
+                    case 'bool-literal':
+                        newNode = NodeFactory.createBoolLiteral(choice.value);
+                        break;
+
+                    case 'var-ref':
+                        newNode = NodeFactory.createVarRef(choice.data.name, choice.data.type);
+                        break;
+
+                    case 'type-select':
+                        newNode = NodeFactory.createType(choice.typeName);
+                        
+                        // Update parent var-decl type info
+                        const parentDecl = hole.closest('[data-node-type="var-decl"]');
+                        if (parentDecl) {
+                            parentDecl.dataset.varType = choice.typeName;
+                            
+                            // Update identifier hole's expected type
+                            const idHole = parentDecl.querySelector('[data-context-type="identifier"]');
+                            if (idHole) {
+                                idHole.dataset.expectedType = choice.typeName;
+                            }
+                        }
+                        break;
+
+                    case 'name-select':
+                        newNode = NodeFactory.createIdentifier(choice.name);
+                        
+                        // Update parent var-decl name info
+                        const parentVarDecl = hole.closest('[data-node-type="var-decl"]');
+                        if (parentVarDecl) {
+                            parentVarDecl.dataset.varName = choice.name;
+                        }
+                        
+                        // Update assignment value hole with the variable's type
+                        const parentAssignment = hole.closest('[data-node-type="assignment"]');
+                        if (parentAssignment) {
+                            // Find the variable type from scope
+                            const currentScope = ScopeManager.getCurrentScope(parentAssignment);
+                            const variable = currentScope.variables.find(v => v.name === choice.name);
+                            
+                            if (variable) {
+                                // After replacing target, the remaining hole is the value hole
+                                // Wait for next tick to let DOM update
+                                setTimeout(() => {
+                                    const valueHole = parentAssignment.querySelector('[data-node-type="hole"]');
+                                    if (valueHole) {
+                                        valueHole.dataset.expectedType = variable.type;
+                                        valueHole.title = `${valueHole.dataset.contextType} hole (expects ${variable.type})`;
+                                    }
+                                }, 0);
+                            }
+                        }
+                        break;
+
+                    case 'binary-op':
+                        newNode = NodeFactory.createBinaryOp(
+                            NodeFactory.createHole('expression', choice.expectedType, scope),
+                            NodeFactory.createOperator('+', 'math'),
+                            NodeFactory.createHole('expression', choice.expectedType, scope),
+                            choice.expectedType
+                        );
+                        break;
+
+                    case 'comparison-op':
+                        // Comparison operators can compare any numeric types (int, float)
+                        // We use 'any' here to allow flexibility - user ensures type consistency
+                        newNode = NodeFactory.createBinaryOp(
+                            NodeFactory.createHole('expression', 'any', scope),
+                            NodeFactory.createOperator('==', 'comparison'),
+                            NodeFactory.createHole('expression', 'any', scope),
+                            'bool' // Returns bool
+                        );
+                        break;
+
+                    // Operators no longer selected via menu - use OperatorGesture instead
+
+                    case 'increment-select':
+                        newNode = NodeFactory.createIncrement(choice.data.name, choice.data.type);
+                        break;
+
+                    case 'function-call':
+                        const paramHoles = choice.data.params.map(param => 
+                            NodeFactory.createHole('expression', param.type, scope)
+                        );
+                        newNode = NodeFactory.createFunctionCall(
+                            choice.data.name,
+                            choice.data.returnType,
+                            paramHoles
+                        );
+                        break;
+
+                    case 'for-loop-simple':
+                        newNode = NodeFactory.createForLoop(scope, 'simple');
+                        break;
+
+                    case 'for-loop-flexible':
+                        newNode = NodeFactory.createForLoop(scope, 'flexible');
+                        break;
+
+                    case 'for-loop-float':
+                        newNode = NodeFactory.createForLoop(scope, 'float');
+                        break;
+
+                    case 'for-loop-custom':
+                        newNode = NodeFactory.createForLoop(scope, 'custom');
+                        break;
+
+                    case 'if-statement':
+                        newNode = NodeFactory.createIfStatement(scope);
+                        break;
+                }
+
+                if (newNode) {
+                    // Replace the hole
+                    hole.replaceWith(newNode);
+
+                    // If this was a statement hole, add a new hole AFTER only
+                    if (contextType === 'statement') {
+                        const parent = newNode.parentElement;
+                        const newScope = ScopeManager.getCurrentScope(parent);
+                        
+                        const nextSibling = newNode.nextSibling;
+                        if (nextSibling) {
+                            parent.insertBefore(
+                                NodeFactory.createHole('statement', 'any', newScope),
+                                nextSibling
+                            );
+                        } else {
+                            parent.appendChild(
+                                NodeFactory.createHole('statement', 'any', newScope)
+                            );
+                        }
+                    }
+
+                    // Update all holes with new scope
+                    ScopeManager.updateAllHoles();
+
+                    // Regenerate code output
+                    CodeGenerator.generate();
+
+                    return newNode;
+                }
+
+                return null;
+            }
+        };
+
+        // ========================================
+        // 2D NUMBER GESTURE
+        // ========================================
+
+        class NumberGesture {
+            constructor() {
+                this.active = false;
+                this.target = null;
+                this.startValue = 0;
+                this.origin = { x: 0, y: 0 };
+                this.feedback = null;
+            }
+
+            start(element, x, y) {
+                if (element.dataset.nodeType !== 'number') return;
+
+                this.active = true;
+                this.target = element;
+                this.startValue = parseFloat(element.dataset.value);
+                this.origin = { x, y };
+
+                // Create feedback tooltip
+                this.feedback = document.createElement('div');
+                this.feedback.className = 'gesture-feedback';
+                document.body.appendChild(this.feedback);
+
+                this.updateFeedback(x, y, this.startValue);
+                
+                // Prevent text selection
+                document.body.style.userSelect = 'none';
+            }
+
+            move(x, y) {
+                if (!this.active) return;
+
+                const dx = x - this.origin.x;
+                const dy = this.origin.y - y; // Inverted for intuitive up = positive
+
+                let newValue;
+                let displayInfo = {};
+
+                const deadZone = 15;
+
+                // Check if we're in the dead zone horizontally (near zero) - use single-unit mode
+                if (dx > 10 && Math.abs(dy) <= deadZone) {
+                    // Single unit increment zone with exponential acceleration
+                    // Formula: pixels + 10^(pixels/10)
+                    const dxAdjusted = dx - 10;
+                    const units = Math.round(dxAdjusted + Math.pow(10, dxAdjusted / 10));
+                    newValue = this.startValue + units;
+                    displayInfo.mode = 'units';
+                    displayInfo.units = units;
+                } else {
+                    // Calculate exponent from horizontal movement
+                    let exponent = Math.floor(dx / 20);
+                    exponent = Math.max(-5, Math.min(5, exponent));
+
+                    // Calculate coefficient from vertical movement
+                    let coefficient = 0;
+                    
+                    if (Math.abs(dy) > deadZone) {
+                        coefficient = dy > 0 
+                            ? Math.floor((dy - deadZone) / 5)
+                            : Math.ceil((dy + deadZone) / 5);
+                        coefficient = Math.max(-99, Math.min(99, coefficient));
+                    }
+
+                    // Calculate delta and new value
+                    const delta = coefficient * Math.pow(10, exponent);
+                    newValue = this.startValue + delta;
+                    
+                    displayInfo.mode = 'exponential';
+                    displayInfo.exponent = exponent;
+                    displayInfo.coefficient = coefficient;
+                }
+
+                // Format value based on type
+                const glslType = this.target.dataset.glslType || 'float';
+                const formattedValue = this.formatNumber(newValue, glslType);
+
+                // Update display
+                this.target.dataset.value = newValue;
+                this.target.textContent = formattedValue;
+
+                this.updateFeedback(x, y, newValue, displayInfo);
+
+                // Regenerate code
+                CodeGenerator.generate();
+            }
+
+            formatNumber(value, type) {
+                if (type === 'int') {
+                    // Integers: no decimal point, round to integer
+                    return Math.floor(value).toString();
+                }
+                
+                // Floats: must have decimal point
+                // Round to max 6 decimal places to avoid floating point errors
+                let rounded = Math.round(value * 1000000) / 1000000;
+                
+                // Convert to string and remove trailing zeros
+                let str = rounded.toString();
+                
+                // If it has a decimal point, trim trailing zeros
+                if (str.includes('.')) {
+                    str = str.replace(/\.?0+$/, '');
+                }
+                
+                // Ensure we have .0 for floats (GLSL requirement)
+                if (!str.includes('.')) {
+                    str += '.0';
+                }
+                
+                return str;
+            }
+
+            end() {
+                if (this.active) {
+                    this.active = false;
+                    this.target = null;
+                    
+                    if (this.feedback) {
+                        this.feedback.remove();
+                        this.feedback = null;
+                    }
+                    
+                    document.body.style.userSelect = '';
+                }
+            }
+
+            updateFeedback(x, y, value, displayInfo = {}) {
+                if (!this.feedback) return;
+
+                this.feedback.style.left = (x + 15) + 'px';
+                this.feedback.style.top = (y - 40) + 'px';
+                
+                const type = this.target?.dataset?.glslType || 'float';
+                const formattedValue = this.formatNumber(value, type);
+                
+                let html = `<div>${formattedValue}</div>`;
+                
+                if (this.active) {
+                    if (displayInfo.mode === 'units' && displayInfo.units !== 0) {
+                        html += `<div class="gesture-hint">+${displayInfo.units} units (${type})</div>`;
+                    } else if (displayInfo.mode === 'exponential' && (displayInfo.exponent !== 0 || displayInfo.coefficient !== 0)) {
+                        html += `<div class="gesture-hint">×10^${displayInfo.exponent} · ${displayInfo.coefficient > 0 ? '+' : ''}${displayInfo.coefficient} (${type})</div>`;
+                    } else {
+                        html += `<div class="gesture-hint">${type}</div>`;
+                    }
+                }
+                
+                this.feedback.innerHTML = html;
+            }
+        }
+
+        // ========================================
+        // OPERATOR GESTURE - Drag to change operators
+        // ========================================
+        
+        class OperatorGesture {
+            constructor() {
+                this.active = false;
+                this.target = null;
+                this.origin = { x: 0, y: 0 };
+                this.feedback = null;
+                this.mode = null; // 'math' or 'comparison'
+            }
+
+            // Operator sets
+            static operators = {
+                math: ['+', '-', '*', '/'],
+                comparison: ['==', '<', '>', '!=', '<=', '>=']
+            };
+
+            start(element, x, y) {
+                if (element.dataset.nodeType !== 'operator') return;
+
+                this.active = true;
+                this.target = element;
+                this.origin = { x, y };
+                this.mode = element.dataset.mode || 'math';
+
+                // Create feedback tooltip
+                this.feedback = document.createElement('div');
+                this.feedback.className = 'gesture-feedback';
+                document.body.appendChild(this.feedback);
+
+                this.updateFeedback(x, y, element.dataset.operator);
+                
+                // Prevent text selection
+                document.body.style.userSelect = 'none';
+            }
+
+            move(x, y) {
+                if (!this.active) return;
+
+                const dx = x - this.origin.x;
+                const dy = y - this.origin.y;
+                
+                // Calculate total distance from origin
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                
+                // Get operator list for current mode
+                const operators = OperatorGesture.operators[this.mode];
+                
+                // Map distance to operator index
+                // 0-20px: operator 0, 20-40px: operator 1, etc.
+                const index = Math.min(
+                    Math.floor(distance / 20),
+                    operators.length - 1
+                );
+                
+                const newOperator = operators[index];
+                
+                // Update operator
+                this.target.dataset.operator = newOperator;
+                this.target.textContent = newOperator;
+                
+                this.updateFeedback(x, y, newOperator, distance, index);
+                
+                // Regenerate code
+                CodeGenerator.generate();
+            }
+
+            end() {
+                if (this.active) {
+                    this.active = false;
+                    this.target = null;
+                    
+                    if (this.feedback) {
+                        this.feedback.remove();
+                        this.feedback = null;
+                    }
+                    
+                    document.body.style.userSelect = '';
+                }
+            }
+
+            updateFeedback(x, y, operator, distance = 0, index = 0) {
+                if (!this.feedback) return;
+
+                this.feedback.style.left = (x + 15) + 'px';
+                this.feedback.style.top = (y - 40) + 'px';
+                
+                const operators = OperatorGesture.operators[this.mode];
+                let html = `<div style="font-size: 20px; font-weight: bold;">${operator}</div>`;
+                
+                if (this.active && distance > 5) {
+                    html += `<div class="gesture-hint">${operators.map((op, i) => 
+                        i === index ? `<strong>${op}</strong>` : op
+                    ).join(' · ')}</div>`;
+                } else {
+                    html += `<div class="gesture-hint">Drag to change</div>`;
+                }
+                
+                this.feedback.innerHTML = html;
+            }
+        }
+
+        // ========================================
+        // DIRECTIONAL GESTURE FOR STATEMENT SELECTION
+        // ========================================
+
+        class DirectionalGesture {
+            constructor() {
+                this.active = false;
+                this.target = null;
+                this.origin = { x: 0, y: 0 };
+                this.currentChoice = null;
+                this.scope = null;
+                this.originalText = null;
+                this.originalColor = null;
+            }
+
+            // Direction configuration (angle in degrees, 0° = East/right)
+            // Main directions go right (NE, E, SE), left reserved for short menus
+            static directionMap = {
+                NE: { 
+                    angle: 45, 
+                    range: 45, 
+                    type: 'for-loop', 
+                    label: 'For Loop', 
+                    icon: '🔁',
+                    distanceChoices: [
+                        { min: 0, max: 70, template: 'simple', label: 'for(int i = 0; i < N; i++)' },
+                        { min: 70, max: 140, template: 'flexible', label: 'for(int i = 0; i < ⮊; ⮊)' },
+                        { min: 140, max: 210, template: 'float', label: 'for(float i = ⮊; i < ⮊; ⮊)' },
+                        { min: 210, max: 999, template: 'custom', label: 'for(int ⮊ = ⮊; ⮊; ⮊)' }
+                    ]
+                },
+                E: { 
+                    angle: 0, 
+                    range: 45, 
+                    type: 'var-decl', 
+                    label: 'Declare Variable', 
+                    icon: '📦',
+                    distanceChoices: [
+                        { min: 0, max: 45, varType: 'float', label: 'float var' },
+                        { min: 45, max: 90, varType: 'int', label: 'int var' },
+                        { min: 90, max: 135, varType: 'vec2', label: 'vec2 var' },
+                        { min: 135, max: 180, varType: 'vec3', label: 'vec3 var' },
+                        { min: 180, max: 225, varType: 'vec4', label: 'vec4 var' },
+                        { min: 225, max: 270, varType: 'bool', label: 'bool var' },
+                        { min: 270, max: 315, varType: 'mat2', label: 'mat2 var' },
+                        { min: 315, max: 360, varType: 'mat3', label: 'mat3 var' },
+                        { min: 360, max: 999, varType: 'mat4', label: 'mat4 var' }
+                    ]
+                },
+                SE: { 
+                    angle: 315, 
+                    range: 45, 
+                    type: 'assignment', 
+                    label: 'Assignment', 
+                    icon: '=',
+                    // distanceChoices populated dynamically based on available variables
+                },
+                S: { angle: 270, range: 45, type: 'if-statement', label: 'If Statement', icon: '❓' },
+                W: { angle: 180, range: 45, type: 'comment', label: 'Comment', icon: '💬', disabled: true },
+                SW: { angle: 225, range: 45, type: 'return', label: 'Return', icon: '↩️', disabled: true },
+                NW: { angle: 135, range: 45, type: 'future', label: '[Future]', icon: '?', disabled: true },
+                N: { angle: 90, range: 45, type: 'future', label: '[Future]', icon: '?', disabled: true }
+            };
+
+            start(element, x, y) {
+                if (element.dataset.nodeType !== 'hole' || element.dataset.contextType !== 'statement') return;
+
+                this.active = true;
+                this.target = element;
+                this.origin = { x, y };
+                this.scope = ScopeManager.getCurrentScope(element);
+                
+                // Store original hole text to restore if cancelled
+                this.originalText = element.textContent;
+                this.originalColor = element.style.color;
+                
+                // Prevent text selection
+                document.body.style.userSelect = 'none';
+            }
+
+            move(x, y) {
+                if (!this.active) return;
+
+                const dx = x - this.origin.x;
+                const dy = y - this.origin.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                
+                // Calculate angle (0° = East, increases counterclockwise)
+                let angle = Math.atan2(-dy, dx) * (180 / Math.PI); // -dy because screen Y is inverted
+                if (angle < 0) angle += 360;
+
+                // Find matching direction
+                let matchedDirection = null;
+                let currentChoice = null;
+
+                if (distance > 10) { // Dead zone to prevent accidental selection
+                    for (const [dir, config] of Object.entries(DirectionalGesture.directionMap)) {
+                        if (config.disabled) continue;
+                        
+                        let minAngle = config.angle - config.range / 2;
+                        let maxAngle = config.angle + config.range / 2;
+                        
+                        // Handle wraparound at 0/360
+                        if (minAngle < 0) minAngle += 360;
+                        if (maxAngle > 360) maxAngle -= 360;
+                        
+                        const inRange = (minAngle < maxAngle) 
+                            ? (angle >= minAngle && angle <= maxAngle)
+                            : (angle >= minAngle || angle <= maxAngle);
+                        
+                        if (inRange) {
+                            matchedDirection = dir;
+                            currentChoice = { ...config };
+                            
+                            // Dynamically populate assignment choices based on available variables
+                            if (config.type === 'assignment') {
+                                if (this.scope.variables && this.scope.variables.length > 0) {
+                                    const varChoices = this.scope.variables.map((v, i) => ({
+                                        min: i * 50,
+                                        max: (i + 1) * 50,
+                                        varName: v.name,
+                                        varType: v.type,
+                                        label: `${v.name} = ...`
+                                    }));
+                                    currentChoice.distanceChoices = varChoices;
+                                } else {
+                                    // No variables, disable assignment
+                                    currentChoice = null;
+                                }
+                            }
+                            
+                            // Check for distance-based sub-choices
+                            if (currentChoice && currentChoice.distanceChoices) {
+                                for (const subChoice of currentChoice.distanceChoices) {
+                                    if (distance >= subChoice.min && distance < subChoice.max) {
+                                        currentChoice = { ...currentChoice, ...subChoice };
+                                        break;
+                                    }
+                                }
+                            }
+                            break;
+                        }
+                    }
+                }
+
+                this.currentChoice = currentChoice;
+                this.updatePreview();
+            }
+
+            end() {
+                if (this.active) {
+                    if (this.currentChoice) {
+                        // Create the selected node
+                        this.createNode(this.currentChoice);
+                    } else {
+                        // No choice selected - restore original hole appearance
+                        if (this.target) {
+                            this.target.textContent = this.originalText;
+                            this.target.style.color = this.originalColor;
+                        }
+                    }
+                    
+                    this.active = false;
+                    this.target = null;
+                    this.currentChoice = null;
+                    this.originalText = null;
+                    this.originalColor = null;
+                    
+                    document.body.style.userSelect = '';
+                }
+            }
+
+            createNode(choice) {
+                if (!this.target) return;
+
+                let newNode = null;
+                const scope = this.scope;
+
+                switch (choice.type) {
+                    case 'var-decl':
+                        const typeNode = choice.varType 
+                            ? NodeFactory.createType(choice.varType)
+                            : NodeFactory.createHole('type', 'any', scope);
+                        
+                        // Auto-generate variable name instead of showing a hole
+                        const varName = this.generateVarName(choice.varType || 'float', scope);
+                        const idNode = NodeFactory.createIdentifier(varName, choice.varType);
+                        
+                        newNode = NodeFactory.createVarDecl(typeNode, idNode, null);
+                        
+                        if (choice.varType) {
+                            setTimeout(() => {
+                                const varDeclEl = idNode.closest('[data-node-type="var-decl"]');
+                                if (varDeclEl) {
+                                    varDeclEl.dataset.varType = choice.varType;
+                                    varDeclEl.dataset.varName = varName;
+                                }
+                            }, 0);
+                        }
+                        break;
+
+                    case 'assignment':
+                        // If varName provided (from distance choice), use it directly
+                        if (choice.varName) {
+                            const varId = NodeFactory.createIdentifier(choice.varName, choice.varType);
+                            newNode = NodeFactory.createAssignment(
+                                varId,
+                                NodeFactory.createHole('expression', choice.varType, scope)
+                            );
+                            
+                            // Set assignment value hole type
+                            setTimeout(() => {
+                                const assignEl = varId.closest('[data-node-type="assignment"]');
+                                if (assignEl) {
+                                    const valueHole = assignEl.querySelector('[data-node-type="hole"]');
+                                    if (valueHole) {
+                                        valueHole.dataset.expectedType = choice.varType;
+                                    }
+                                }
+                            }, 0);
+                        } else if (scope.variables && scope.variables.length > 0) {
+                            // Fallback: show hole to select variable
+                            newNode = NodeFactory.createAssignment(
+                                NodeFactory.createHole('identifier', 'any', scope, 'select-existing'),
+                                NodeFactory.createHole('expression', 'any', scope)
+                            );
+                        }
+                        break;
+
+                    case 'for-loop':
+                        newNode = NodeFactory.createForLoop(scope, choice.template || 'simple');
+                        break;
+
+                    case 'if-statement':
+                        newNode = NodeFactory.createIfStatement(scope);
+                        break;
+                }
+
+                if (newNode) {
+                    // Replace the hole
+                    this.target.replaceWith(newNode);
+
+                    // Add new hole after
+                    const parent = newNode.parentElement;
+                    const newScope = ScopeManager.getCurrentScope(parent);
+                    
+                    const nextSibling = newNode.nextSibling;
+                    if (nextSibling) {
+                        parent.insertBefore(
+                            NodeFactory.createHole('statement', 'any', newScope),
+                            nextSibling
+                        );
+                    } else {
+                        parent.appendChild(
+                            NodeFactory.createHole('statement', 'any', newScope)
+                        );
+                    }
+
+                    // Update all holes with new scope
+                    ScopeManager.updateAllHoles();
+
+                    // Regenerate code output
+                    CodeGenerator.generate();
+                }
+            }
+
+            updatePreview() {
+                if (!this.target) return;
+
+                // Show preview IN PLACE with proper multi-color HTML
+                if (this.currentChoice) {
+                    const previewHTML = this.getPreviewHTML(this.currentChoice);
+                    this.target.innerHTML = previewHTML;
+                    this.target.style.color = ''; // Reset, colors are in the HTML
+                } else {
+                    // No choice selected, show original hole icon
+                    this.target.textContent = '⮊';
+                    this.target.style.color = '';
+                }
+            }
+
+            getPreviewHTML(choice) {
+                // Generate multi-colored HTML preview using CSS classes
+                switch (choice.type) {
+                    case 'var-decl':
+                        if (choice.varType) {
+                            const varName = this.generateVarName(choice.varType, this.scope);
+                            return `<span class="type-keyword">${choice.varType}</span> <span class="var-name" data-var-type="${choice.varType}">${varName}</span>`;
+                        }
+                        return 'declare';
+                    
+                    case 'assignment':
+                        if (choice.varName) {
+                            return `<span class="var-name" data-var-type="${choice.varType}">${choice.varName}</span> <span class="operator">=</span> ...`;
+                        }
+                        return 'assign';
+                    
+                    case 'for-loop':
+                        const forKw = `<span class="keyword">for</span>`;
+                        const punc = (text) => `<span class="punctuation">${text}</span>`;
+                        const typeKw = (text) => `<span class="type-keyword">${text}</span>`;
+                        const varName = (name, type) => `<span class="var-name" data-var-type="${type}">${name}</span>`;
+                        const op = (text) => `<span class="operator">${text}</span>`;
+                        const num = (val, type) => `<span class="number-literal" data-glsl-type="${type}">${val}</span>`;
+                        const hole = `<span class="hole">⮊</span>`;
+                        
+                        if (choice.template === 'simple') {
+                            return `${forKw}${punc('(')}${typeKw('int')} ${varName('i', 'int')} ${op('=')} ${num('0', 'int')}${punc('; ')}${varName('i', 'int')} ${op('<')} ${hole}${punc('; ')}${varName('i', 'int')}${op('++)')}`;
+                        } else if (choice.template === 'flexible') {
+                            return `${forKw}${punc('(')}${typeKw('int')} ${varName('i', 'int')} ${op('=')} ${num('0', 'int')}${punc('; ')}${varName('i', 'int')} ${op('<')} ${hole}${punc('; ')}${hole}${punc(')')}`;
+                        } else if (choice.template === 'float') {
+                            return `${forKw}${punc('(')}${typeKw('float')} ${varName('i', 'float')} ${op('=')} ${hole}${punc('; ')}${varName('i', 'float')} ${op('<')} ${hole}${punc('; ')}${hole}${punc(')')}`;
+                        } else if (choice.template === 'custom') {
+                            return `${forKw}${punc('(')}${typeKw('int')} ${hole} ${op('=')} ${hole}${punc('; ')}${hole}${punc('; ')}${hole}${punc(')')}`;
+                        }
+                        return `${forKw}${punc('(...)')}`;
+                    
+                    case 'if-statement':
+                        return `<span class="keyword">if</span> <span class="punctuation">(...)</span>`;
+                    
+                    case 'comment':
+                        return `<span class="punctuation">// comment</span>`;
+                    
+                    case 'return':
+                        return `<span class="keyword">return</span>`;
+                    
+                    default:
+                        return choice.label || '?';
+                }
+            }
+
+
+            generateVarName(type, scope) {
+                // Auto-generate variable names based on type
+                const typePrefix = {
+                    'float': 'myFloat',
+                    'int': 'myInt',
+                    'vec2': 'myVec2',
+                    'vec3': 'myVec3',
+                    'vec4': 'myVec4',
+                    'bool': 'myBool',
+                    'mat2': 'myMat2',
+                    'mat3': 'myMat3',
+                    'mat4': 'myMat4'
+                };
+
+                const prefix = typePrefix[type] || 'myVar';
+                const existingVars = scope.variables || [];
+                
+                // Find next available number
+                let counter = 0;
+                let varName = prefix + counter;
+                while (existingVars.some(v => v.name === varName)) {
+                    counter++;
+                    varName = prefix + counter;
+                }
+                
+                return varName;
+            }
+        }
+
+        // ========================================
+        // CODE GENERATION
+        // ========================================
+
+        const CodeGenerator = {
+            generate() {
+                const root = document.getElementById('editor');
+                const glsl = this.toGLSL(root, 0);
+                document.getElementById('output').textContent = glsl || '// Empty program';
+            },
+
+            toGLSL(element, indent = 0) {
+                if (!element) return '';
+                
+                // Handle text nodes (nodeType === 3)
+                if (element.nodeType === 3) {
+                    return element.textContent || '';
+                }
+                
+                const nodeType = element.dataset?.nodeType;
+
+                switch (nodeType) {
+                    case 'function-decl': {
+                        const returnType = element.dataset.returnType;
+                        const name = element.dataset.name;
+                        const body = element.querySelector('[data-role="body"]');
+                        
+                        let statements = '';
+                        if (body) {
+                            statements = Array.from(body.childNodes)
+                                .map(child => this.toGLSL(child, 1))
+                                .filter(s => s && s.trim())
+                                .map(s => '  ' + s)
+                                .join('\n');
+                        }
+
+                        return `${returnType} ${name}() {\n${statements}\n}`;
+                    }
+
+                    case 'var-decl': {
+                        // Get nodes directly from DOM instead of relying on dataset
+                        const typeNode = element.querySelector('[data-node-type="type"]');
+                        const nameNode = element.querySelector('[data-node-type="identifier"]');
+                        
+                        if (!typeNode || !nameNode) return '';
+                        
+                        let decl = `${typeNode.textContent} ${nameNode.textContent}`;
+                        
+                        // Look for any expression type as initializer
+                        const initNode = element.querySelector('[data-node-type="number"], [data-node-type="bool-literal"], [data-node-type="var-ref"], [data-node-type="binary-op"], [data-node-type="function-call"]');
+                        
+                        if (initNode) {
+                            decl += ` = ${this.toGLSL(initNode, indent)}`;
+                        }
+                        
+                        return decl + ';';
+                    }
+
+                    case 'assignment': {
+                        const targetNode = element.querySelector('[data-node-type="identifier"], [data-node-type="var-ref"]');
+                        
+                        if (!targetNode) return '';
+                        
+                        // Look for value inside the [data-role="value"] container, or as direct child
+                        const valueContainer = element.querySelector('[data-role="value"]');
+                        const valueNode = (valueContainer || element).querySelector('[data-node-type="number"], [data-node-type="bool-literal"], [data-node-type="var-ref"], [data-node-type="binary-op"], [data-node-type="function-call"]');
+                        
+                        if (!valueNode) return '';
+                        
+                        return `${this.toGLSL(targetNode, indent)} = ${this.toGLSL(valueNode, indent)};`;
+                    }
+
+                    case 'number': {
+                        const value = parseFloat(element.dataset.value);
+                        const type = element.dataset.glslType || 'float';
+                        
+                        if (type === 'int') {
+                            return Math.floor(value).toString();
+                        } else {
+                            // Float must have decimal point in GLSL
+                            if (Number.isInteger(value)) {
+                                return value.toString() + '.0';
+                            }
+                            return value.toString();
+                        }
+                    }
+
+                    case 'bool-literal':
+                        return element.dataset.value === 'true' ? 'true' : 'false';
+
+                    case 'type':
+                        return element.dataset.typeName;
+
+                    case 'identifier':
+                        return element.dataset.name;
+
+                    case 'var-ref':
+                        return element.dataset.varName;
+
+                    case 'binary-op': {
+                        // DOM is truth - serialize ALL children including text nodes (parens, spaces)
+                        return Array.from(element.childNodes)
+                            .map(child => this.toGLSL(child, indent))
+                            .join('');
+                    }
+
+                    case 'increment': {
+                        // Serialize increment expression (e.g., i++)
+                        return Array.from(element.childNodes)
+                            .map(child => child.textContent)
+                            .join('');
+                    }
+
+                    case 'operator':
+                        return element.dataset.operator;
+
+                    case 'function-call': {
+                        const funcName = element.dataset.functionName;
+                        const params = [];
+                        
+                        // Traverse direct children and collect parameter expressions
+                        Array.from(element.childNodes).forEach(child => {
+                            if (child.nodeType === 1) { // ELEMENT_NODE
+                                const childType = child.dataset?.nodeType;
+                                // Only collect expression nodes, skip text nodes and punctuation
+                                if (childType === 'hole' || childType === 'number' || childType === 'bool-literal' ||
+                                    childType === 'var-ref' || childType === 'binary-op' || 
+                                    childType === 'function-call') {
+                                    const result = this.toGLSL(child, indent);
+                                    if (result) params.push(result);
+                                }
+                            }
+                        });
+                        
+                        return `${funcName}(${params.join(', ')})`;
+                    }
+
+                    case 'for-loop': {
+                        const header = element.querySelector('[data-role="header"]');
+                        const body = element.querySelector('[data-role="body"]');
+                        
+                        if (!header || !body) return '';
+                        
+                        // DOM is truth: find semantic nodes by their data-node-type
+                        const iteratorNode = header.querySelector('[data-node-type="identifier"]');
+                        
+                        // Find all expression nodes (init, condition, increment) - be comprehensive
+                        const expressionNodes = Array.from(header.childNodes).filter(node => {
+                            if (node.nodeType !== 1) return false; // Skip text nodes
+                            const nodeType = node.dataset?.nodeType;
+                            return nodeType === 'hole' || 
+                                   nodeType === 'number' || 
+                                   nodeType === 'bool-literal' ||
+                                   nodeType === 'var-ref' || 
+                                   nodeType === 'binary-op' ||
+                                   nodeType === 'increment' ||
+                                   nodeType === 'function-call';
+                        });
+                        
+                        if (!iteratorNode || expressionNodes.length < 3) return '';
+                        
+                        const iteratorName = iteratorNode.dataset.name;
+                        const initValue = this.toGLSL(expressionNodes[0], indent) || '0';
+                        const condition = this.toGLSL(expressionNodes[1], indent) || 'i < 10';
+                        const increment = this.toGLSL(expressionNodes[2], indent) || 'i++';
+                        
+                        // Indentation strings
+                        const indentStr = '  '.repeat(indent);
+                        const innerIndentStr = '  '.repeat(indent + 1);
+                        
+                        // Body statements with proper indentation
+                        const statements = Array.from(body.children)
+                            .map(child => innerIndentStr + this.toGLSL(child, indent + 1))
+                            .filter(s => s.trim())
+                            .join('\n');
+                        
+                        return `for (int ${iteratorName} = ${initValue}; ${condition}; ${increment}) {\n${statements}\n${indentStr}}`;
+                    }
+
+                    case 'if-statement': {
+                        const header = element.querySelector('[data-role="header"]');
+                        const body = element.querySelector('[data-role="body"]');
+                        
+                        if (!header || !body) return '';
+                        
+                        // Extract condition
+                        const conditionHole = header.querySelector('[data-node-type="hole"], [data-node-type="number"], [data-node-type="bool-literal"], [data-node-type="var-ref"], [data-node-type="binary-op"]');
+                        const condition = conditionHole ? this.toGLSL(conditionHole, indent) : 'true';
+                        
+                        // Indentation strings
+                        const indentStr = '  '.repeat(indent);
+                        const innerIndentStr = '  '.repeat(indent + 1);
+                        
+                        // Body statements with proper indentation
+                        const statements = Array.from(body.children)
+                            .map(child => innerIndentStr + this.toGLSL(child, indent + 1))
+                            .filter(s => s.trim())
+                            .join('\n');
+                        
+                        return `if (${condition}) {\n${statements}\n${indentStr}}`;
+                    }
+
+                    case 'hole':
+                        return ''; // Holes don't generate code
+
+                    default:
+                        // Recursively process children
+                        if (element.childNodes) {
+                            const children = Array.from(element.childNodes)
+                                .map(child => this.toGLSL(child, indent))
+                                .filter(s => s && s.trim());
+                            
+                            // If this is the root editor div, join with newlines
+                            if (element.id === 'editor') {
+                                return children.join('\n\n');
+                            }
+                            
+                            // Otherwise join without separators
+                            return children.join('');
+                        }
+                        return '';
+                }
+            }
+        };
+
+        // ========================================
+        // CHOICE PICKER UI
+        // ========================================
+
+        const ChoicePicker = {
+            current: null,
+            currentHole: null,
+            isDragging: false,
+            hoveredChoice: null,
+            currentSubmenu: null,
+            submenuTimer: null,
+
+            show(hole, choices) {
+                // Remove existing picker
+                this.hide();
+
+                if (choices.length === 0) return;
+
+                this.currentHole = hole;
+                this.isDragging = false;
+
+                const picker = document.createElement('div');
+                picker.className = 'choice-picker';
+
+                // Add header
+                const header = document.createElement('div');
+                header.className = 'choice-header';
+                header.textContent = `Choose ${hole.dataset.contextType}`;
+                picker.appendChild(header);
+
+                // Add choices
+                choices.forEach(choice => {
+                    const btn = document.createElement('button');
+                    btn.className = 'choice-button';
+                    btn.dataset.choiceType = choice.type;
+                    
+                    const icon = document.createElement('span');
+                    icon.className = 'choice-icon';
+                    icon.textContent = choice.icon;
+                    
+                    const label = document.createElement('span');
+                    label.className = 'choice-label';
+                    label.textContent = choice.label;
+                    
+                    btn.appendChild(icon);
+                    btn.appendChild(label);
+                    
+                    // Add submenu indicator if present
+                    if (choice.submenu) {
+                        const arrow = document.createElement('span');
+                        arrow.className = 'submenu-arrow';
+                        arrow.textContent = '▶';
+                        btn.appendChild(arrow);
+                        btn.dataset.hasSubmenu = 'true';
+                    }
+                    
+                    btn.dataset.choice = JSON.stringify(choice);
+                    picker.appendChild(btn);
+                });
+
+                // Position near the hole
+                const rect = hole.getBoundingClientRect();
+                picker.style.left = rect.left + 'px';
+                picker.style.top = (rect.bottom + 5) + 'px';
+
+                document.body.appendChild(picker);
+                this.current = picker;
+
+                // Start drag interaction
+                this.setupDragInteraction();
+            },
+
+            setupDragInteraction() {
+                // Track mouse position
+                const handleMouseMove = (e) => {
+                    if (!this.current) return;
+
+                    const element = document.elementFromPoint(e.clientX, e.clientY);
+                    const button = element?.closest('.choice-button');
+
+                    // Clear previous hover on main menu
+                    this.current.querySelectorAll('.choice-button').forEach(btn => {
+                        btn.classList.remove('hovered');
+                    });
+                    
+                    // Clear previous hover on submenu
+                    if (this.currentSubmenu) {
+                        this.currentSubmenu.querySelectorAll('.choice-button').forEach(btn => {
+                            btn.classList.remove('hovered');
+                        });
+                    }
+
+                    if (button) {
+                        // Check if button is in main menu or submenu
+                        const inMainMenu = this.current.contains(button);
+                        const inSubmenu = this.currentSubmenu?.contains(button);
+
+                        if (inMainMenu || inSubmenu) {
+                            button.classList.add('hovered');
+                            this.hoveredChoice = JSON.parse(button.dataset.choice);
+
+                            // Show submenu if present (with delay) and not already shown
+                            if (button.dataset.hasSubmenu === 'true' && !this.currentSubmenu) {
+                                clearTimeout(this.submenuTimer);
+                                this.submenuTimer = setTimeout(() => {
+                                    this.showSubmenu(button, this.hoveredChoice.submenu);
+                                }, 200);
+                            }
+                        } else {
+                            this.hoveredChoice = null;
+                            clearTimeout(this.submenuTimer);
+                        }
+                    } else {
+                        this.hoveredChoice = null;
+                        clearTimeout(this.submenuTimer);
+                    }
+                };
+
+                const handleMouseUp = (e) => {
+                    document.removeEventListener('mousemove', handleMouseMove);
+                    document.removeEventListener('mouseup', handleMouseUp);
+
+                    if (this.hoveredChoice && !this.hoveredChoice.submenu) {
+                        // Select the choice
+                        InteractionController.replaceHole(this.currentHole, this.hoveredChoice);
+                        this.hide();
+                    } else if (!this.hoveredChoice) {
+                        // Cancel if released outside
+                        this.hide();
+                    }
+                };
+
+                document.addEventListener('mousemove', handleMouseMove);
+                document.addEventListener('mouseup', handleMouseUp);
+            },
+
+            showSubmenu(parentButton, submenuChoices) {
+                // Remove existing submenu
+                if (this.currentSubmenu) {
+                    this.currentSubmenu.remove();
+                    this.currentSubmenu = null;
+                }
+
+                const submenu = document.createElement('div');
+                submenu.className = 'choice-submenu';
+
+                submenuChoices.forEach(choice => {
+                    const btn = document.createElement('button');
+                    btn.className = 'choice-button';
+                    
+                    const icon = document.createElement('span');
+                    icon.className = 'choice-icon';
+                    icon.textContent = choice.icon;
+                    
+                    const label = document.createElement('span');
+                    label.className = 'choice-label';
+                    label.textContent = choice.label;
+                    
+                    btn.appendChild(icon);
+                    btn.appendChild(label);
+                    btn.dataset.choice = JSON.stringify(choice);
+                    
+                    submenu.appendChild(btn);
+                });
+
+                // Position to the right of parent
+                const rect = parentButton.getBoundingClientRect();
+                submenu.style.left = (rect.right + 5) + 'px';
+                submenu.style.top = rect.top + 'px';
+
+                document.body.appendChild(submenu);
+                this.currentSubmenu = submenu;
+            },
+
+            hide() {
+                if (this.current) {
+                    this.current.remove();
+                    this.current = null;
+                }
+                if (this.currentSubmenu) {
+                    this.currentSubmenu.remove();
+                    this.currentSubmenu = null;
+                }
+                clearTimeout(this.submenuTimer);
+                this.currentHole = null;
+                this.hoveredChoice = null;
+                this.isDragging = false;
+            }
+        };
+
+        // ========================================
+        // APPLICATION INITIALIZATION
+        // ========================================
+
+        class Application {
+            constructor() {
+                this.numberGesture = new NumberGesture();
+                this.operatorGesture = new OperatorGesture();
+                this.directionalGesture = new DirectionalGesture();
+                this.setupEventListeners();
+                this.initialize();
+            }
+
+            initialize() {
+                // Load user settings (theme, etc.)
+                UserSettings.load();
+
+                const editor = document.getElementById('editor');
+                editor.innerHTML = '';
+
+                // Add root-level hole for declarations/functions before main
+                const rootHoleBefore = NodeFactory.createHole('statement');
+                rootHoleBefore.style.display = 'block';
+                rootHoleBefore.style.marginBottom = '10px';
+                editor.appendChild(rootHoleBefore);
+
+                // Create initial function with one statement hole
+                const mainFunc = NodeFactory.createFunctionDecl(
+                    'void',
+                    'main',
+                    [],
+                    [NodeFactory.createHole('statement')]
+                );
+
+                editor.appendChild(mainFunc);
+                
+                // Update scope and generate code
+                ScopeManager.updateAllHoles();
+                CodeGenerator.generate();
+            }
+
+            setupEventListeners() {
+                // Non-statement hole clicks (keep old menu system)
+                document.addEventListener('click', (e) => {
+                    const hole = e.target.closest('[data-node-type="hole"]');
+                    if (hole && hole.dataset.contextType !== 'statement') {
+                        const choices = ChoiceGenerator.getChoices(hole);
+                        ChoicePicker.show(hole, choices);
+                        e.stopPropagation();
+                    }
+                });
+
+                // Gesture-based interactions
+                document.addEventListener('mousedown', (e) => {
+                    // Statement holes use directional gesture
+                    const hole = e.target.closest('[data-node-type="hole"]');
+                    if (hole && hole.dataset.contextType === 'statement') {
+                        this.directionalGesture.start(hole, e.clientX, e.clientY);
+                        e.preventDefault();
+                        return;
+                    }
+
+                    // Numbers use number gesture
+                    const number = e.target.closest('[data-node-type="number"]');
+                    if (number) {
+                        this.numberGesture.start(number, e.clientX, e.clientY);
+                        e.preventDefault();
+                        return;
+                    }
+
+                    // Operators use operator gesture
+                    const operator = e.target.closest('[data-node-type="operator"]');
+                    if (operator) {
+                        this.operatorGesture.start(operator, e.clientX, e.clientY);
+                        e.preventDefault();
+                    }
+                });
+
+                document.addEventListener('mousemove', (e) => {
+                    this.numberGesture.move(e.clientX, e.clientY);
+                    this.operatorGesture.move(e.clientX, e.clientY);
+                    this.directionalGesture.move(e.clientX, e.clientY);
+                });
+
+                document.addEventListener('mouseup', () => {
+                    this.numberGesture.end();
+                    this.operatorGesture.end();
+                    this.directionalGesture.end();
+                });
+
+                // Touch support
+                document.addEventListener('touchstart', (e) => {
+                    const number = e.target.closest('[data-node-type="number"]');
+                    if (number && e.touches.length === 1) {
+                        const touch = e.touches[0];
+                        this.numberGesture.start(number, touch.clientX, touch.clientY);
+                        e.preventDefault();
+                    }
+                });
+
+                document.addEventListener('touchmove', (e) => {
+                    if (e.touches.length === 1) {
+                        const touch = e.touches[0];
+                        this.numberGesture.move(touch.clientX, touch.clientY);
+                        e.preventDefault();
+                    }
+                });
+
+                document.addEventListener('touchend', () => {
+                    this.numberGesture.end();
+                });
+
+                // Button controls
+                document.getElementById('btn-theme').onclick = () => {
+                    const newTheme = UserSettings.toggleTheme();
+                    console.log(`Theme switched to: ${newTheme}`);
+                };
+
+                document.getElementById('btn-clear').onclick = () => {
+                    if (confirm('Clear the editor?')) {
+                        this.initialize();
+                    }
+                };
+
+                document.getElementById('btn-export').onclick = () => {
+                    const glsl = document.getElementById('output').textContent;
+                    this.exportToFile(glsl, 'shader.glsl');
+                };
+            }
+
+            exportToFile(content, filename) {
+                const blob = new Blob([content], { type: 'text/plain' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                a.click();
+                URL.revokeObjectURL(url);
+            }
+        }
+
+        // Start the application
+        const app = new Application();
+    </script>
+</body>
+</html>
+

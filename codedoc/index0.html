@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">          
+    <title>Index</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300;1,400;1,500&display=swap" rel="stylesheet">
+    <style>
+      body {
+        font-family: "DM Mono", monospace;
+        font-size: 16px;
+        user-select: none;
+      }
+      .dec {
+        cursor: default;
+        padding: 5px;
+      }
+      .fun {
+        font-weight: 400;
+        font-style: normal;
+        color: #000000;
+      }
+      .nam {
+        display:inline;
+        font-weight: 300;
+        font-style: normal;
+        color: #000000;
+      }
+      .m33 {
+        display:inline;
+        font-weight: 500;
+        font-style: normal;
+        color: #5900ac;
+      }
+      
+      .int {
+        display:inline;
+        font-weight: 300;
+        font-style: normal;
+        padding: 5px;
+        color: #0000ff;
+      }
+      .typ {
+        display:inline;
+        font-weight: 500;
+        font-style: normal;
+        color: #5900ac;
+      }
+      .com {
+        display:inline;
+        font-weight: 300;
+        font-style: italic;
+        color: #a1a1a1;
+      }
+      .box {
+        width: 800px;
+        height: 300px;
+        top: 50%;
+        right: 50%;
+        padding: 10px;
+        border: 1px solid #0084ff;
+        border-radius: 2px;
+        background: #e2f2ff;
+        resize: both;
+        text-wrap: nowrap;
+        overflow: auto;
+      }
+    </style>
+  </head>
+  <body>
+    <script>
+      "use strict";
+      var dragging = false;
+      var dragged = null;
+      var dmode = 0;
+      var dragorigin = {x:0, y:0};
+      var dragamount = {x:0, y:0};
+      var prevalue = 0;
+      
+      const h1 = '<div class="';
+      const h2 = '">';
+      const h3 = '</div>';
+      const h4 = '" class="';
+      const h5 = '" id="';
+      const h6 = '&nbsp';
+      
+      document.addEventListener('mousedown', onDocumentMouseDown, false);
+      document.addEventListener('mousemove', onDocumentMouseMove, false);
+      document.addEventListener('mouseup', onDocumentMouseUp, false);
+      
+      
+      
+      function createIdentifier(name){
+        if (name==null){name="varName" + counter};
+        return('<div class="nam">' + name + '</div>');
+      }
+      
+      function onDocumentMouseDown(event){
+        if (event.target.classList.contains("int")){
+          dragorigin.x = event.clientX;
+          dragorigin.y = event.clientY;
+          dragging=true;
+          dragged = event.target;
+          prevalue = Number(dragged.childNodes[0].textContent);
+
+          
+          const rect = dragged.getBoundingClientRect();
+          var output = document.getElementById("output");
+          var o = document.createTextNode("X: " + (dragorigin.x-rect.x) + ", Y: " + (dragorigin.y-rect.y));
+          output.replaceChild(o, output.childNodes[0]);
+        }
+      }
+      
+      function onDocumentMouseUp(event){
+        event.preventDefault();
+        dragging = false;
+        //if(dragged.childNodes[0].textContent != "0"){dmode=1;};
+      }
+      
+      function onDocumentMouseMove(event){
+
+        if(dragging){
+          event.preventDefault();
+          dragamount.x =  event.clientX - dragorigin.x;
+          dragamount.y = dragorigin.y - event.clientY;
+          // These are the drag areas, above the text line are positive numbers with a coefficient higher than 1
+          // Below are negative numbers with a coefficient higher than 1
+          //                           2   /
+          //                      ________/
+          //                 1    ________|   0
+          //                              \
+          //                           3   \
+          var darea, coeff, expon, total=0;
+          var asize = 15;
+          if(dragamount.x<-asize && -dragamount.x+asize>(Math.abs(dragamount.y)-asize)/2){
+            darea = coeff = expon = 0;
+          } else if (dragamount.y>asize){
+            darea=2;
+            coeff = dragamount.y-asize+10;
+          } else if (dragamount.y<-asize){
+            darea=3;
+            coeff = dragamount.y-asize+25;
+            if(coeff>-10){coeff=-10;}
+          } else {
+            darea=1;
+            coeff = 1;
+          }
+          if(darea>0){
+            expon = -1+Math.floor((dragamount.x)/10);
+            if(expon<-1){expon=-1;}
+            if(expon>18){expon=18;}
+          }
+          if(coeff>99){coeff=99;}
+          if(coeff<-99){coeff=-99;}
+          if(coeff>0){
+            total = Math.floor(coeff*Math.pow(10, expon));
+            } else {total = Math.ceil(coeff*Math.pow(10, expon));}
+          total = total+prevalue;
+          var t = document.createTextNode(total);
+          dragged.replaceChild(t, dragged.childNodes[0]);
+        }
+      }
+    </script>
+    <div class="box">
+      <div class="fun">
+        <div class="typ">void </div>
+        <div class="nam">funName</div>(
+        <div class="nam">arg1</div>:
+        <div class="typ">int</div>)
+        <div class="cod">{
+          <div class="dec">&nbsp&nbsp
+            <div class="typ">int </div>
+            <div class="nam">varName1</div> = 
+            <div class="int">0</div>; 
+            <div class="com">// int declaration</div>
+          </div>
+          <div class="dec">&nbsp&nbsp
+            <div class="typ">mat3 </div>
+            <div class="nam">varName2</div> =
+            <div class="m33">mat3(<div class="int">0</div>,<div class="int">0</div>,<div class="int">0</div>,<div class="int">0</div>,<div class="int">0</div>,<div class="int">0</div>,<div class="int">0</div>,<div class="int">0</div>,<div class="int">0</div>)
+            </div>;
+            <div class="com">// matrix 3x3 declaration</div>
+          </div>
+          <div class="new">&nbsp&nbsp▸</div>
+          <div class="new">&nbsp&nbsp▸</div>
+          <div class="new">&nbsp&nbsp▸</div>
+          <div class="new">&nbsp&nbsp▸</div>
+          <div class="new">&nbsp&nbsp▸</div>
+          <div class="new">&nbsp&nbsp▸</div>
+        </div>}
+      </div>
+      <div class="new">▸</div>
+      <div class="new">▸</div>
+      <div class="new">▸</div>
+      <div class="new">▸</div>
+      <div class="new">▸</div>
+    </div>
+    <div id="output" class="out">Over: none</div>
+  </body>
+</html>
