@@ -1,0 +1,291 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>simu</title>
+</head>
+<body>
+    <script>
+    // 'sndB' is a GPU read-write buffer
+    // 'sndB' is tranfered from GPU to CPU every 'sndTg' seconds to be played as sound
+    // 'sndB' has 'sndSu' samples of left channel followed by 'sndSu' samples for right channel
+    // 'audioPlayTime'    use to know when 'sndB' will be played as sound
+    // 'audioPlayTime'    increments every 'sndTg' seconds by 'sndTg' seconds
+    // 'audioPlayTime'    is relative to AudioContext.currentTime
+    // 'audioCurrentTime' is AudioContext.currentTime, use with 'audioPlayTime' to syncronize visuals-audio
+    // 'audioFrame'       frame ID of 'sndB', increments +1 every 'sndTg' seconds
+
+    gpuDv     = null;               //gpu device
+    sndCx     = null;               //sound context
+    sndRt     = 48000;              //generate sound sample rate
+    sndFr     = 0;                  //generate sound frame ID
+    sndCn     = 0;                  //generate sound every X seconds counter
+    sndTg     = .1;                 //generate sound every X seconds
+    sndSu     = (sndTg*sndRt)|0;    //generate sound every X samples
+    sndCh     = 2;                  //sound channels
+    sndVo     = .5;                 //sound volume control
+    computeDZ = 2<<26;              //size of compute buffer for wateveruse 'myB'
+    computeSZ = 4*sndCh*sndSu;      //size of compute buffer for sound 'sndB'
+    screenT   = 64;                 //compute threads of shader rendering to screen
+    screenZ   = 256;                //screen texture size
+    uniformZ  = 10;                 //UniformStruct total elements
+    timP      = 0;                  //updated time each frame
+    myWGSL    = `
+    const sndRt   =`+sndRt  +`;
+    const sndSu   =`+sndSu  +`;
+    const screenT =`+screenT+`;
+    const screenZ =`+screenZ+`;
+    const PI      = 3.1415926535897932f;
+
+    struct UniformStruct
+    {
+        time             : f32,
+        audioCurrentTime : f32,
+        audioPlayTime    : f32,
+        audioFractTime   : f32,
+        audioFrame       : i32,
+    }
+    @binding(0) @group(0) var<uniform            > myU: UniformStruct;
+    @binding(1) @group(0) var<storage, read_write> myB: array<f32>;  //buffer used for whatever computation you want
+    @binding(2) @group(0) var<storage, read_write> sndB: array<f32>;
+    @binding(3) @group(0) var screen: texture_storage_2d<bgra8unorm, write>;
+
+    @compute @workgroup_size(screenT, 1, 1)
+    fn mainRnd(@builtin(global_invocation_id) id3: vec3<u32>)
+    {
+        //write to screen texture
+        var pos = vec2f(id3.xy)/f32(screenZ);
+        var col = vec4f(0,cos(pos + myU.time)*.5+.5,0);
+        textureStore(screen, id3.xy, col);
+
+        //write to sound buffer
+        var w = i32(id3.x + id3.y*u32(screenZ));
+        if(w < sndSu)
+        {
+            var smpt =     myU.audioFractTime + f32(w)/f32(sndRt);  //time of this sample, minus whole seconds.
+                //smpt = f32(myU.audioFrame*sndSu +  w)/f32(sndRt); //time of this sample
+            var freq = 400f;                                        //sound frequency in hertz
+            var v    = cos(smpt*freq*PI*2f);
+            sndB[sndSu*0 + w] = v;                                  //sound left  channel
+            sndB[sndSu*1 + w] = v;                                  //sound right channel
+        }
+    }`;
+
+    start = function()
+    {
+        iniWebGPU();
+        iniWebAudio();
+        //button to enable sound
+        butPlay = document.createElement("button");
+        butPlay.style.width    = "200px";
+        butPlay.innerHTML      = "enable sound";
+        butPlay.onclick        = iniWebAudio;
+        document.body.appendChild(butPlay);
+    };
+    window.onload = start;  
+    iniWebGPU = function()
+    {
+        requi = {
+            requiredFeatures : ['bgra8unorm-storage'],
+            requiredLimits   : {
+                maxBufferSize               : Math.pow(2,31)-64,
+                maxStorageBufferBindingSize : Math.pow(2,31)-64,
+            }
+        };
+        navigator.gpu.requestAdapter()
+        .then(adapter => adapter.requestDevice(requi))
+        .then(device  => iniWebGPU2(device));
+    };
+    iniWebGPU2 = function(device)
+    {
+        gpuDv = device;
+
+        canvas = document.createElement("canvas");
+        canvas.style.top    = "0px";
+        canvas.style.left   = "0px";
+        canvas.style.width  = screenZ+"px";
+        canvas.style.height = screenZ+"px";
+        canvas.width        = screenZ;
+        canvas.height       = screenZ;
+        document.body.appendChild(canvas);
+
+        context = canvas.getContext('webgpu');
+        presentationFormat = navigator.gpu.getPreferredCanvasFormat();
+
+        context.configure({
+            device: gpuDv,
+            format: presentationFormat,
+            usage: GPUTextureUsage.STORAGE_BINDING,
+            //alphaMode: 'premultiplied',
+        });
+
+        bindGroupLayout0 = gpuDv.createBindGroupLayout({
+            entries: [
+                {
+                    binding: 0,
+                    visibility: GPUShaderStage.COMPUTE,
+                    buffer: { type: 'uniform', },
+                },
+                {
+                    binding: 1,
+                    visibility: GPUShaderStage.COMPUTE,
+                    buffer: { type: 'storage', },
+                },
+                {
+                    binding: 2,
+                    visibility: GPUShaderStage.COMPUTE,
+                    buffer: { type: 'storage', },
+                },
+                {
+                    binding: 3,
+                    visibility: GPUShaderStage.COMPUTE,
+                    storageTexture: { format : "bgra8unorm",//bgra8unorm  rgba8unorm
+                                      access : "write-only",
+                                      viewDimension : "2d", },
+                },
+            ],
+        });
+
+        buffGPUuniform = gpuDv.createBuffer({
+            size: uniformZ * Uint32Array.BYTES_PER_ELEMENT,
+            usage:
+                GPUBufferUsage.STORAGE |
+                GPUBufferUsage.UNIFORM |
+                GPUBufferUsage.COPY_DST,
+            mappedAtCreation: false,
+        });
+        buffGPUcompute = gpuDv.createBuffer({
+            size: computeDZ,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+            mappedAtCreation: false,
+        });
+        buffGPUsoundSRC = gpuDv.createBuffer({
+            size: computeSZ,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+            mappedAtCreation: false,
+        });
+        buffGPUsoundDST = gpuDv.createBuffer({
+            size: computeSZ,
+            usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+        });
+
+        myShader         = gpuDv.createShaderModule({ code: myWGSL });
+        computePipelineR = gpuDv.createComputePipeline({
+            layout: gpuDv.createPipelineLayout({
+                bindGroupLayouts: [bindGroupLayout0],
+            }),
+            compute: {
+                module: myShader,
+                entryPoint: 'mainRnd',
+            },
+        });
+
+        requestAnimationFrame(render);
+    };
+    iniWebAudio = function()
+    {
+        if(sndCx == null)
+        {
+            sndCx      = new window.AudioContext();
+            sndCn      = Math.floor(sndCx.currentTime / sndTg + 1) * sndTg;
+            myGainNode = sndCx.createGain();
+            myGainNode.connect(sndCx.destination);
+            audioPlay = function()
+            {
+                let data = new Float32Array(buffGPUsoundDST.getMappedRange());
+                let sb = sndCx.createBuffer(sndCh, sndSu, sndRt);
+                let rd = 0;
+                for(let i = 0; i<sndCh; i++)
+                {
+                    let d = sb.getChannelData(i);
+                    for(let j = 0; j < sndSu; ++j)
+                    {
+                        d[j] = data[rd];  rd++;
+                    }
+                }
+                buffGPUsoundDST.unmap();
+                myGainNode.gain.value = sndVo;
+                let myAudioNode     = sndCx.createBufferSource();
+                myAudioNode.onended = myAudioNode.disconnect;
+                myAudioNode.buffer  = sb;
+                myAudioNode.connect(myGainNode);
+                myAudioNode.start(sndCn);
+            };
+        }
+        //play random sound because some browsers
+        //lock AudioContext.currentTime till any sound is played
+        if(sndCx != null)
+        {
+            let z  = ((sndRt * .07)|0) + 1;
+            let sb = sndCx.createBuffer(sndCh, z, sndRt);
+            for(let i = 0; i<sndCh; i++)
+            {
+                let d = sb.getChannelData(i);
+                for(let j = 0; j < z; ++j)
+                {
+                    d[j] = (Math.random()*2-1)*.1;
+                }
+            }
+            myGainNode.gain.value = sndVo;
+            let myAudioNode     = sndCx.createBufferSource();
+            myAudioNode.onended = myAudioNode.disconnect;
+            myAudioNode.buffer  = sb;
+            myAudioNode.connect(myGainNode);
+            myAudioNode.start();
+        }
+    };
+    
+    render = function()
+    {
+        let timN = performance.now();
+        let timD = (timN-timP)*.001;
+        timP = timN;
+
+        //update UniformStruct
+        let uniformD  = new ArrayBuffer(uniformZ*4);
+        let uniformDf = new Float32Array(uniformD);
+        let uniformDi = new   Int32Array(uniformD);
+        uniformDf[0] = timN*.001;
+        uniformDf[1] = sndCx.currentTime;
+        uniformDf[2] = sndCn + sndTg;
+        uniformDf[3] = uniformDf[2] % 1;
+        uniformDi[4] = sndFr;
+
+        gpuDv.queue.writeBuffer(buffGPUuniform, 0, uniformD);
+
+        let view      = context.getCurrentTexture().createView();
+        let bindGroup = gpuDv.createBindGroup({
+            layout: bindGroupLayout0,
+            entries: [
+                { binding: 0, resource: { buffer: buffGPUuniform    } },
+                { binding: 1, resource: { buffer: buffGPUcompute    } },
+                { binding: 2, resource: { buffer: buffGPUsoundSRC   } },
+                { binding: 3, resource: view                          },
+            ],
+        });
+       
+        //run compute shader
+        commandEncoder = gpuDv.createCommandEncoder();
+        passEncoderCompute = commandEncoder.beginComputePass();
+        passEncoderCompute.setPipeline(computePipelineR);
+        passEncoderCompute.setBindGroup(0, bindGroup);
+        passEncoderCompute.dispatchWorkgroups(screenZ/screenT,screenZ,1);
+        passEncoderCompute.end();
+        gpuDv.queue.submit([commandEncoder.finish()]);
+
+        //send sound GPU to CPU and play
+        if(sndCx != null && sndCx.currentTime > sndCn)
+        {
+            sndCn = Math.floor(sndCx.currentTime / sndTg + 1) * sndTg;
+            sndFr++;
+            commandEncoder = gpuDv.createCommandEncoder();
+            commandEncoder.copyBufferToBuffer(buffGPUsoundSRC, 0, buffGPUsoundDST, 0, buffGPUsoundDST.size);
+            gpuDv.queue.submit([commandEncoder.finish()]);
+            buffGPUsoundDST.mapAsync(GPUMapMode.READ).then(audioPlay);
+        }
+
+        requestAnimationFrame(render);
+    };
+    </script>
+</body>
+</html>

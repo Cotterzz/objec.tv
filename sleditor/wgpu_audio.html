@@ -60,13 +60,22 @@
             cursor: pointer;
             font-size: 14px;
             font-weight: 500;
+            transition: background 0.2s;
         }
         button:hover {
             background: #1177bb;
         }
-        button:disabled {
-            background: #3c3c3c;
-            cursor: not-allowed;
+        button.playing {
+            background: #16825d;
+        }
+        button.playing:hover {
+            background: #1a9870;
+        }
+        button.paused {
+            background: #c5a332;
+        }
+        button.paused:hover {
+            background: #d4b547;
         }
         #errorDisplay {
             background: #1e1e1e;
@@ -97,14 +106,29 @@
             color: #858585;
             font-size: 12px;
         }
+        .statusBadge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 11px;
+            font-weight: bold;
+        }
+        .statusBadge.playing {
+            background: #16825d;
+            color: white;
+        }
+        .statusBadge.paused {
+            background: #c5a332;
+            color: white;
+        }
     </style>
 </head>
 <body>
     <div id="container">
         <div id="leftPanel">
             <div id="controls">
+                <button id="playPauseBtn" class="paused">▶ Play</button>
                 <button id="reloadBtn">Reload Shader (Ctrl+Enter)</button>
-                <button id="audioBtn">Enable Audio</button>
                 <label style="color: #858585;">
                     Volume: <input type="range" id="volumeSlider" min="0" max="100" value="50" style="width: 100px;">
                     <span id="volumeValue">50%</span>
@@ -119,7 +143,7 @@
         <div id="rightPanel">
             <canvas id="canvas"></canvas>
             <div class="hint">
-                Audio: <span id="audioStatus">Waiting...</span><br>
+                Audio: <span id="audioStatus" class="statusBadge paused">⏸ PAUSED</span><br>
                 Frame: <span id="frameCounter">0</span><br>
                 Time: <span id="timeCounter">0.00s</span>
             </div>
@@ -181,6 +205,7 @@
         readbackIndex: 0,
         pendingAudio: false,
         isRunning: false,
+        isPlaying: false,
     };
 
     // ============================================================================
@@ -262,7 +287,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             await reloadShader();
             state.isRunning = true;
             requestAnimationFrame(render);
-            logStatus('System initialized successfully!', 'success');
+            logStatus('System initialized successfully! Press Play to start audio.', 'success');
         } catch (err) {
             logStatus('Initialization failed: ' + err.message, 'error');
         }
@@ -294,18 +319,18 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                 e.preventDefault();
                 reloadShader();
             }
+            // Spacebar to play/pause
+            if (e.key === ' ' && e.ctrlKey) {
+                e.preventDefault();
+                togglePlayPause();
+            }
         });
+
+        // Play/Pause button
+        document.getElementById('playPauseBtn').addEventListener('click', togglePlayPause);
 
         // Reload button
         document.getElementById('reloadBtn').addEventListener('click', reloadShader);
-
-        // Audio button
-        const audioBtn = document.getElementById('audioBtn');
-        audioBtn.addEventListener('click', () => {
-            state.audioContext?.resume();
-            audioBtn.textContent = 'Audio Enabled ✓';
-            audioBtn.disabled = true;
-        });
 
         // Volume control
         const volumeSlider = document.getElementById('volumeSlider');
@@ -319,7 +344,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
         // Handle visibility change to fix audio timing issues
         document.addEventListener('visibilitychange', () => {
-            if (!document.hidden && state.audioContext) {
+            if (!document.hidden && state.audioContext && state.isPlaying) {
                 // Page became visible - resync audio timing
                 const ctx = state.audioContext;
                 state.nextAudioTime = Math.ceil(ctx.currentTime / CONFIG.audioBlockDuration) 
@@ -328,6 +353,45 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                 logStatus('Audio resynced after page visibility change', 'info');
             }
         });
+    }
+
+    function togglePlayPause() {
+        if (!state.audioContext) return;
+        
+        const btn = document.getElementById('playPauseBtn');
+        const statusBadge = document.getElementById('audioStatus');
+        
+        if (state.isPlaying) {
+            // Pause
+            state.audioContext.suspend();
+            state.isPlaying = false;
+            btn.textContent = '▶ Play';
+            btn.className = 'paused';
+            statusBadge.textContent = '⏸ PAUSED';
+            statusBadge.className = 'statusBadge paused';
+            logStatus('Audio paused', 'info');
+        } else {
+            // Play
+            state.audioContext.resume();
+            state.isPlaying = true;
+            
+            // Resync timing when starting
+            const ctx = state.audioContext;
+            state.nextAudioTime = Math.ceil(ctx.currentTime / CONFIG.audioBlockDuration) 
+                                 * CONFIG.audioBlockDuration;
+            state.pendingAudio = false;
+            
+            btn.textContent = '⏸ Pause';
+            btn.className = 'playing';
+            statusBadge.textContent = '▶ PLAYING';
+            statusBadge.className = 'statusBadge playing';
+            logStatus('Audio playing', 'success');
+            
+            // Play unlock sound on first play
+            if (ctx.state === 'suspended') {
+                playUnlockSound();
+            }
+        }
     }
 
     async function initWebGPU() {
@@ -400,7 +464,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         state.nextAudioTime = Math.ceil(state.audioContext.currentTime / CONFIG.audioBlockDuration) 
                              * CONFIG.audioBlockDuration;
         
-        playUnlockSound();
+        // Start in suspended state
+        state.audioContext.suspend();
     }
 
     function playUnlockSound() {
@@ -476,8 +541,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         // Update UI
         document.getElementById('frameCounter').textContent = state.audioFrame;
         document.getElementById('timeCounter').textContent = (time * 0.001).toFixed(2) + 's';
-        document.getElementById('audioStatus').textContent = 
-            ctx.state === 'running' ? '🔊 Playing' : '🔇 Suspended';
 
         // Update uniforms
         const uniformData = new ArrayBuffer(256);
@@ -516,8 +579,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         );
         pass.end();
 
-        // Audio transfer timing
-        if (ctx.currentTime >= state.nextAudioTime - CONFIG.audioBlockDuration && !state.pendingAudio) {
+        // Audio transfer timing (only when playing)
+        if (state.isPlaying && ctx.currentTime >= state.nextAudioTime - CONFIG.audioBlockDuration && !state.pendingAudio) {
             state.pendingAudio = true;
             
             const readbackBuffer = state.audioBuffersReadback[state.readbackIndex];

@@ -1,0 +1,389 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>WGSL Compute Audio-Visual Synthesizer</title>
+</head>
+<body>
+    <script>
+    'use strict';
+
+    // ============================================================================
+    // Configuration & Constants
+    // ============================================================================
+    const CONFIG = {
+        sampleRate: 48000,
+        audioBlockDuration: 0.1,      // seconds per audio block
+        channels: 2,
+        volume: 0.5,
+        screenSize: 256,
+        computeThreads: 64,
+        computeBufferSize: 2 << 20,   // 2MB for general compute (reduced from 256MB!)
+    };
+
+    const DERIVED = {
+        samplesPerBlock: (CONFIG.audioBlockDuration * CONFIG.sampleRate) | 0,
+        audioBufferSize: 0, // calculated below
+    };
+    DERIVED.audioBufferSize = 4 * CONFIG.channels * DERIVED.samplesPerBlock;
+
+    const UNIFORM_STRUCT = {
+        time: 0,
+        audioCurrentTime: 1,
+        audioPlayTime: 2,
+        audioFractTime: 3,
+        audioFrame: 4,
+        SIZE: 5, // floats (20 bytes, but GPU will pad to 32)
+    };
+
+    // ============================================================================
+    // Application State
+    // ============================================================================
+    const state = {
+        gpuDevice: null,
+        audioContext: null,
+        gainNode: null,
+        
+        // GPU Resources (created once, reused)
+        canvas: null,
+        gpuContext: null,
+        bindGroupLayout: null,
+        pipeline: null,
+        uniformBuffer: null,
+        computeBuffer: null,
+        audioBufferGPU: null,
+        audioBuffersReadback: [null, null], // double-buffered for race-condition safety
+        bindGroups: [], // one per readback buffer
+        
+        // Timing
+        lastFrameTime: 0,
+        audioFrame: 0,
+        nextAudioTime: 0,
+        
+        // Audio double-buffering
+        readbackIndex: 0,
+        pendingAudio: false,
+    };
+
+    // ============================================================================
+    // WGSL Shader
+    // ============================================================================
+    const WGSL = `
+const SAMPLE_RATE = ${CONFIG.sampleRate}f;
+const SAMPLES_PER_BLOCK = ${DERIVED.samplesPerBlock};
+const COMPUTE_THREADS = ${CONFIG.computeThreads};
+const SCREEN_SIZE = ${CONFIG.screenSize};
+const PI = 3.1415926535897932f;
+const TAU = 6.283185307179586f;
+
+struct Uniforms {
+    time: f32,
+    audioCurrentTime: f32,
+    audioPlayTime: f32,
+    audioFractTime: f32,     // Keeps float precision by using fractional seconds only
+    audioFrame: i32,
+}
+
+@binding(0) @group(0) var<uniform> uniforms: Uniforms;
+@binding(1) @group(0) var<storage, read_write> computeBuffer: array<f32>;
+@binding(2) @group(0) var<storage, read_write> audioBuffer: array<f32>;
+@binding(3) @group(0) var screenTexture: texture_storage_2d<bgra8unorm, write>;
+
+@compute @workgroup_size(COMPUTE_THREADS, 1, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let threadId = gid.x + gid.y * u32(SCREEN_SIZE);
+    
+    // ========================================================================
+    // Graphics: Write to screen texture
+    // ========================================================================
+    if (gid.x < u32(SCREEN_SIZE) && gid.y < u32(SCREEN_SIZE)) {
+        let uv = vec2f(gid.xy) / f32(SCREEN_SIZE);
+        let t = uniforms.time;
+        
+        // Animated pattern synced to audio
+        let audioPhase = uniforms.audioFractTime * TAU * 400.0; // 400Hz tone
+        let pattern = cos(uv * 10.0 + t);
+        let pulse = cos(audioPhase) * 0.5 + 0.5;
+        
+        let color = vec4f(
+            pattern.x * 0.5 + 0.5,
+            pattern.y * 0.5 + 0.5,
+            pulse,
+            1.0
+        );
+        
+        textureStore(screenTexture, gid.xy, color);
+    }
+    
+    // ========================================================================
+    // Audio: Generate samples (continuous phase-accurate synthesis)
+    // ========================================================================
+    let sampleIndex = i32(threadId);
+    if (sampleIndex < SAMPLES_PER_BLOCK) {
+        // TIME PRECISION FIX: Use fractional seconds to avoid float drift
+        // The key insight: sin(x + 2πn) = sin(x), so whole seconds don't matter
+        let sampleTime = uniforms.audioFractTime + f32(sampleIndex) / SAMPLE_RATE;
+        
+        // Your synthesis code here - example 400Hz tone
+        let frequency = 400.0;
+        let phase = sampleTime * frequency * TAU;
+        let sample = sin(phase);
+        
+        // Write to interleaved stereo buffer
+        audioBuffer[sampleIndex] = sample;                      // Left
+        audioBuffer[SAMPLES_PER_BLOCK + sampleIndex] = sample;  // Right
+    }
+}
+`;
+
+    // ============================================================================
+    // Initialization
+    // ============================================================================
+    async function init() {
+        await initWebGPU();
+        initWebAudio();
+        createUI();
+        requestAnimationFrame(render);
+    }
+
+    async function initWebGPU() {
+        const adapter = await navigator.gpu?.requestAdapter();
+        if (!adapter) throw new Error('WebGPU not supported');
+
+        state.gpuDevice = await adapter.requestDevice({
+            requiredFeatures: ['bgra8unorm-storage'],
+            requiredLimits: {
+                maxBufferSize: Math.pow(2, 30),
+                maxStorageBufferBindingSize: Math.pow(2, 30),
+            }
+        });
+
+        // Canvas setup
+        state.canvas = document.createElement('canvas');
+        state.canvas.width = CONFIG.screenSize;
+        state.canvas.height = CONFIG.screenSize;
+        state.canvas.style.cssText = `
+            width: ${CONFIG.screenSize}px;
+            height: ${CONFIG.screenSize}px;
+            image-rendering: pixelated;
+            border: 1px solid #333;
+        `;
+        document.body.appendChild(state.canvas);
+
+        state.gpuContext = state.canvas.getContext('webgpu');
+        state.gpuContext.configure({
+            device: state.gpuDevice,
+            format: navigator.gpu.getPreferredCanvasFormat(),
+            usage: GPUTextureUsage.STORAGE_BINDING,
+        });
+
+        // Create GPU resources (ONCE!)
+        createGPUResources();
+    }
+
+    function createGPUResources() {
+        const device = state.gpuDevice;
+
+        // Buffers
+        state.uniformBuffer = device.createBuffer({
+            size: 256, // Pad to 256 bytes for alignment
+            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+        });
+
+        state.computeBuffer = device.createBuffer({
+            size: CONFIG.computeBufferSize,
+            usage: GPUBufferUsage.STORAGE,
+        });
+
+        state.audioBufferGPU = device.createBuffer({
+            size: DERIVED.audioBufferSize,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+        });
+
+        // Double-buffered readback (prevents race conditions)
+        for (let i = 0; i < 2; i++) {
+            state.audioBuffersReadback[i] = device.createBuffer({
+                size: DERIVED.audioBufferSize,
+                usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+            });
+        }
+
+        // Bind group layout
+        state.bindGroupLayout = device.createBindGroupLayout({
+            entries: [
+                { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
+                { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
+                { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
+                { binding: 3, visibility: GPUShaderStage.COMPUTE, storageTexture: { 
+                    format: 'bgra8unorm', access: 'write-only', viewDimension: '2d' 
+                }},
+            ],
+        });
+
+        // Pipeline
+        const shaderModule = device.createShaderModule({ code: WGSL });
+        state.pipeline = device.createComputePipeline({
+            layout: device.createPipelineLayout({
+                bindGroupLayouts: [state.bindGroupLayout],
+            }),
+            compute: { module: shaderModule, entryPoint: 'main' },
+        });
+
+        // Create bind groups (one per readback buffer, for double-buffering)
+        // Note: We'll recreate these each frame for the texture view, but that's necessary
+        // Actually, we can't cache these because texture view changes each frame
+        // So we'll create them in render(), but this is unavoidable with the canvas
+    }
+
+    function initWebAudio() {
+        state.audioContext = new AudioContext();
+        state.gainNode = state.audioContext.createGain();
+        state.gainNode.gain.value = CONFIG.volume;
+        state.gainNode.connect(state.audioContext.destination);
+        
+        // Initialize timing
+        state.nextAudioTime = Math.ceil(state.audioContext.currentTime / CONFIG.audioBlockDuration) 
+                             * CONFIG.audioBlockDuration;
+        
+        // Play short noise to unlock audio (browser requirement)
+        playUnlockSound();
+    }
+
+    function playUnlockSound() {
+        const ctx = state.audioContext;
+        const buffer = ctx.createBuffer(2, ctx.sampleRate * 0.05, ctx.sampleRate);
+        for (let ch = 0; ch < 2; ch++) {
+            const data = buffer.getChannelData(ch);
+            for (let i = 0; i < data.length; i++) {
+                data[i] = (Math.random() * 2 - 1) * 0.1;
+            }
+        }
+        const source = ctx.createBufferSource();
+        source.buffer = buffer;
+        source.connect(state.gainNode);
+        source.start();
+    }
+
+    function createUI() {
+        const button = document.createElement('button');
+        button.textContent = 'Enable Audio';
+        button.style.cssText = 'width: 200px; margin: 10px;';
+        button.onclick = () => {
+            state.audioContext?.resume();
+            button.textContent = 'Audio Enabled';
+            button.disabled = true;
+        };
+        document.body.appendChild(button);
+    }
+
+    // ============================================================================
+    // Render Loop
+    // ============================================================================
+    function render(time) {
+        const device = state.gpuDevice;
+        const ctx = state.audioContext;
+        
+        // Update uniforms
+        const uniformData = new ArrayBuffer(256);
+        const uniformF32 = new Float32Array(uniformData);
+        const uniformI32 = new Int32Array(uniformData);
+        
+        uniformF32[UNIFORM_STRUCT.time] = time * 0.001;
+        uniformF32[UNIFORM_STRUCT.audioCurrentTime] = ctx.currentTime;
+        uniformF32[UNIFORM_STRUCT.audioPlayTime] = state.nextAudioTime;
+        uniformF32[UNIFORM_STRUCT.audioFractTime] = state.nextAudioTime % 1; // PRECISION FIX
+        uniformI32[UNIFORM_STRUCT.audioFrame] = state.audioFrame;
+        
+        device.queue.writeBuffer(state.uniformBuffer, 0, uniformData);
+
+        // Create bind group (necessary because texture view changes each frame)
+        const textureView = state.gpuContext.getCurrentTexture().createView();
+        const bindGroup = device.createBindGroup({
+            layout: state.bindGroupLayout,
+            entries: [
+                { binding: 0, resource: { buffer: state.uniformBuffer } },
+                { binding: 1, resource: { buffer: state.computeBuffer } },
+                { binding: 2, resource: { buffer: state.audioBufferGPU } },
+                { binding: 3, resource: textureView },
+            ],
+        });
+
+        // Dispatch compute shader
+        const encoder = device.createCommandEncoder();
+        const pass = encoder.beginComputePass();
+        pass.setPipeline(state.pipeline);
+        pass.setBindGroup(0, bindGroup);
+        pass.dispatchWorkgroups(
+            CONFIG.screenSize / CONFIG.computeThreads,
+            CONFIG.screenSize,
+            1
+        );
+        pass.end();
+
+        // Check if it's time to transfer audio
+        if (ctx.currentTime >= state.nextAudioTime - CONFIG.audioBlockDuration && !state.pendingAudio) {
+            state.pendingAudio = true;
+            
+            // Use double-buffered readback
+            const readbackBuffer = state.audioBuffersReadback[state.readbackIndex];
+            encoder.copyBufferToBuffer(
+                state.audioBufferGPU, 0,
+                readbackBuffer, 0,
+                DERIVED.audioBufferSize
+            );
+            
+            device.queue.submit([encoder.finish()]);
+            
+            // Async readback and playback
+            readbackBuffer.mapAsync(GPUMapMode.READ).then(() => {
+                playAudioBlock(readbackBuffer);
+                state.readbackIndex = 1 - state.readbackIndex; // Swap buffers
+                state.pendingAudio = false;
+            });
+        } else {
+            device.queue.submit([encoder.finish()]);
+        }
+
+        requestAnimationFrame(render);
+    }
+
+    function playAudioBlock(readbackBuffer) {
+        const ctx = state.audioContext;
+        const audioData = new Float32Array(readbackBuffer.getMappedRange());
+        
+        // Create Web Audio buffer
+        const audioBuffer = ctx.createBuffer(
+            CONFIG.channels,
+            DERIVED.samplesPerBlock,
+            CONFIG.sampleRate
+        );
+        
+        // De-interleave channels
+        for (let ch = 0; ch < CONFIG.channels; ch++) {
+            const channelData = audioBuffer.getChannelData(ch);
+            const offset = ch * DERIVED.samplesPerBlock;
+            for (let i = 0; i < DERIVED.samplesPerBlock; i++) {
+                channelData[i] = audioData[offset + i];
+            }
+        }
+        
+        readbackBuffer.unmap();
+        
+        // Schedule playback
+        const source = ctx.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(state.gainNode);
+        source.start(state.nextAudioTime);
+        
+        // Advance timing
+        state.nextAudioTime += CONFIG.audioBlockDuration;
+        state.audioFrame++;
+    }
+
+    // ============================================================================
+    // Start
+    // ============================================================================
+    window.addEventListener('load', init);
+    </script>
+</body>
+</html>
