@@ -171,15 +171,14 @@
         </div>
     </div>
 
-    <!-- Load Monaco from CDN -->
+    <!-- Load from CDN -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs/loader.min.js"></script>
     
     <script>
     'use strict';
 
-    // ============================================================================
     // Monaco Editor Setup
-    // ============================================================================
+
     let monacoEditor = null;
 
     // Configure Monaco loader
@@ -295,9 +294,8 @@
         }
     };
 
-    // ============================================================================
     // Configuration & Constants
-    // ============================================================================
+
     const CONFIG = {
         sampleRate: 48000,
         audioBlockDuration: 0.1,
@@ -323,9 +321,8 @@
         SIZE: 5,
     };
 
-    // ============================================================================
     // Application State
-    // ============================================================================
+
     const state = {
         gpuDevice: null,
         audioContext: null,
@@ -358,9 +355,9 @@
     mouseY: 0,
 };
 
-    // ============================================================================
+
     // Default WGSL Shader
-    // ============================================================================
+
 const DEFAULT_WGSL = `const SAMPLE_RATE = ${CONFIG.sampleRate}f;
 const SAMPLES_PER_BLOCK = ${DERIVED.samplesPerBlock};
 const COMPUTE_THREADS = ${CONFIG.computeThreads};
@@ -391,10 +388,9 @@ struct Uniforms {
 @compute @workgroup_size(COMPUTE_THREADS, 1, 1)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let threadId = gid.x + gid.y * u32(SCREEN_SIZE);
-    
-    // ========================================================================
+
     // Graphics: Write to screen texture
-    // ========================================================================
+   
     if (gid.x < u32(SCREEN_SIZE) && gid.y < u32(SCREEN_SIZE)) {
         let uv = vec2f(gid.xy) / f32(SCREEN_SIZE);
         let t = uniforms.time;
@@ -417,9 +413,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         textureStore(screenTexture, gid.xy, color);
     }
     
-    // ========================================================================
     // Audio: Generate samples (frequency controlled by JavaScript!)
-    // ========================================================================
     let sampleIndex = i32(threadId);
     if (sampleIndex < SAMPLES_PER_BLOCK) {
         // TIME PRECISION FIX: Use fractional seconds to avoid float drift
@@ -466,9 +460,7 @@ function enterframe(state, api) {
     // api.uniforms.setFloat(8, someValue);
     // api.uniforms.setFloat(9, anotherValue);
 }`;
-    // ============================================================================
     // Monaco Initialization
-    // ============================================================================
 
     function initMonaco(callback) {
     require(['vs/editor/editor.main'], function() {
@@ -509,7 +501,7 @@ function enterframe(state, api) {
                 }*/
         });
         
-        // Create JavaScript editor (ADD THIS)
+        // Create JavaScript editor 
         const jsContainer = document.getElementById('jsEditorContainer');
         state.jsEditor = monaco.editor.create(jsContainer, {
             value: DEFAULT_JS,
@@ -607,9 +599,7 @@ function compileUserJS() {
         return false;
     }
 }
-    // ============================================================================
     // Initialization
-    // ============================================================================
     async function init() {
         setupUI();
         
@@ -676,7 +666,6 @@ function togglePlayPause() {
     const statusBadge = document.getElementById('audioStatus');
     
     if (state.isPlaying) {
-        // Pause (existing code)
         state.audioContext.suspend();
         state.isPlaying = false;
         btn.textContent = '▶ Play';
@@ -685,7 +674,6 @@ function togglePlayPause() {
         statusBadge.className = 'statusBadge paused';
         logStatus('Audio paused', 'info');
     } else {
-        // Play - ADD THIS SECTION
         // Compile and initialize user JS
         if (compileUserJS()) {
             try {
@@ -699,7 +687,6 @@ function togglePlayPause() {
             return; // Don't start if JS compilation failed
         }
         
-        // Existing resume code
         state.audioContext.resume();
         state.isPlaying = true;
         
@@ -786,9 +773,7 @@ function togglePlayPause() {
         state.audioContext.suspend();
     }
 
-    // ============================================================================
     // Live Shader Reload
-    // ============================================================================
     async function reloadShader() {
     const code = monacoEditor.getValue();
     
@@ -818,7 +803,7 @@ function togglePlayPause() {
         
         state.pipeline = newPipeline;
         
-        // ADD THIS - Also reload JS if playing
+        // Also reload JS if playing
         if (state.isPlaying) {
             if (compileUserJS()) {
                 logStatus('✓ Shader and JS reloaded successfully!', 'success');
@@ -840,9 +825,7 @@ function togglePlayPause() {
         display.className = type;
     }
 
-    // ============================================================================
     // Render Loop (unchanged)
-    // ============================================================================
     function render(time) {
         if (!state.isRunning) return;
 
