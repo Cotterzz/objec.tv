@@ -454,7 +454,7 @@ function enterframe(state, api) {
     state.mouseY += (api.mouse.y - state.mouseY) * 0.1;
     
     // Animate frequency (440Hz ± 100Hz)
-    state.smoothFreq = 440 + Math.sin(api.time * 0.5) * 100;
+    state.smoothFreq = 440;// + Math.sin(api.time * 0.5) * 100; // sounds weird
     
     // Pass data to WGSL shader uniforms
     // Indices 5-9 map to: mouseX, mouseY, frequency, user3, user4
