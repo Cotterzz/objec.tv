@@ -148,19 +148,13 @@
                 </label>
             </div>
 <div id="editorTabs">
-    <button class="editorTab active" onclick="switchTab('boilerplate')">📄 Boilerplate</button>
-    <button class="editorTab" onclick="switchTab('graphics')">🎨 Graphics</button>
-    <button class="editorTab" onclick="switchTab('audio')">🔊 Audio</button>
-    <button class="editorTab" onclick="switchTab('js')">⚡ JavaScript</button>
+    <button class="editorTab active" onclick="switchTab('wgsl')">WGSL Shader</button>
+    <button class="editorTab" onclick="switchTab('js')">JavaScript</button>
 </div>
-<div id="boilerplateContainer" style="flex: 1; border: 1px solid #3c3c3c; border-radius: 4px; overflow: hidden;">
+<div id="editorContainer">
     <div id="loadingMessage">Loading Monaco Editor...</div>
 </div>
-<div id="graphicsContainer" style="flex: 1; border: 1px solid #3c3c3c; border-radius: 4px; overflow: hidden; display: none;">
-</div>
-<div id="audioContainer" style="flex: 1; border: 1px solid #3c3c3c; border-radius: 4px; overflow: hidden; display: none;">
-</div>
-<div id="jsEditorContainer" style="flex: 1; border: 1px solid #3c3c3c; border-radius: 4px; overflow: hidden; display: none;">
+<div id="jsEditorContainer" style="flex: 1; border: 1px solid #3c3c3c; border-radius: 4px; overflow: hidden;">
 </div>
             <div>
                 <div class="hint">Status:</div>
@@ -303,7 +297,7 @@
     // Configuration & Constants
 
     const CONFIG = {
-        audioBlockDuration: 0.05,
+        audioBlockDuration: 0.1,
         channels: 2,
         volume: 0.5,
         screenSize: 512,
@@ -355,12 +349,7 @@
         isRunning: false,
         isPlaying: false,
     
-        // Monaco editors
-        boilerplateEditor: null,
-        graphicsEditor: null,
-        audioEditor: null,
         jsEditor: null,
-        
         userState: null,
         userInit: null,
         userEnterframe: null,
@@ -369,15 +358,10 @@
 };
 
 
-    // Default WGSL Shader Parts
+    // Default WGSL Shader (function to allow dynamic values)
 
-function getBoilerplate() {
-    return `// ============================================================================
-// AUTO-GENERATED BOILERPLATE
-// This section is read-only and updates when settings change
-// ============================================================================
-
-const SAMPLE_RATE = ${DERIVED.sampleRate}f;
+function getDefaultWGSL() {
+    return `const SAMPLE_RATE = ${DERIVED.sampleRate}f;
 const SAMPLES_PER_BLOCK = ${DERIVED.samplesPerBlock};
 const COMPUTE_THREADS = ${CONFIG.computeThreads};
 const SCREEN_SIZE = ${CONFIG.screenSize};
@@ -404,15 +388,13 @@ struct Uniforms {
 @binding(2) @group(0) var<storage, read_write> audioBuffer: array<f32>;
 @binding(3) @group(0) var screenTexture: texture_storage_2d<bgra8unorm, write>;
 @binding(4) @group(0) var<storage, read_write> phaseState: array<f32>;
-`;
-}
 
-function getDefaultGraphicsShader() {
-    return `// ============================================================================
-// GRAPHICS SHADER - Edit this to create visuals
+// ============================================================================
+// GRAPHICS PASS - Optimized for 2D texture operations
 // ============================================================================
 @compute @workgroup_size(8, 8, 1)
 fn graphics_main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    // No bounds check needed - dispatch matches texture size exactly
     if (gid.x >= u32(SCREEN_SIZE) || gid.y >= u32(SCREEN_SIZE)) {
         return;
     }
@@ -474,12 +456,9 @@ fn graphics_main(@builtin(global_invocation_id) gid: vec3<u32>) {
     
     textureStore(screenTexture, gid.xy, vec4f(color, 1.0));
 }
-`;
-}
 
-function getDefaultAudioShader() {
-    return `// ============================================================================
-// AUDIO SHADER - Edit this to create sound
+// ============================================================================
+// AUDIO PASS - Optimized for sequential sample generation
 // ============================================================================
 @compute @workgroup_size(128, 1, 1)
 fn audio_main(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -524,8 +503,7 @@ fn audio_main(@builtin(global_invocation_id) gid: vec3<u32>) {
         
         phaseState[0] = finalPhase;
     }
-}
-`;
+}`;
 }
 
 const DEFAULT_JS = `// This code runs alongside your WGSL shader
@@ -574,8 +552,13 @@ function enterframe(state, api) {
         monaco.languages.setLanguageConfiguration('wgsl', WGSL_LANGUAGE_CONFIG);
         monaco.languages.setMonarchTokensProvider('wgsl', WGSL_MONARCH_TOKENS);
         
-        // Common editor options
-        const editorOptions = {
+        // Create WGSL editor
+        const container = document.getElementById('editorContainer');
+        container.innerHTML = '';
+        
+        monacoEditor = monaco.editor.create(container, {
+            value: getDefaultWGSL(),
+            language: 'wgsl',
             theme: 'vs-dark',
             fontSize: 13,
             minimap: { enabled: false },
@@ -584,66 +567,60 @@ function enterframe(state, api) {
             wordWrap: 'on',
             tabSize: 4,
             insertSpaces: true,
-            formatOnPaste: true,
-            formatOnType: true,
-            suggestOnTriggerCharacters: true,
-            acceptSuggestionOnEnter: 'on',
-            folding: true,
-            foldingStrategy: 'indentation',
-            renderWhitespace: 'selection',
-            renderControlCharacters: false,
-            scrollbar: {
-                vertical: 'visible',
-                horizontal: 'visible',
-                useShadows: false,
-                verticalHasArrows: false,
-                horizontalHasArrows: false
-            }
-        };
-        
-        // Create Boilerplate editor (read-only)
-        const boilerplateContainer = document.getElementById('boilerplateContainer');
-        boilerplateContainer.innerHTML = '';
-        state.boilerplateEditor = monaco.editor.create(boilerplateContainer, {
-            ...editorOptions,
-            value: getBoilerplate(),
-            language: 'wgsl',
-            readOnly: true,  // Read-only!
-        });
-        
-        // Create Graphics editor
-        const graphicsContainer = document.getElementById('graphicsContainer');
-        state.graphicsEditor = monaco.editor.create(graphicsContainer, {
-            ...editorOptions,
-            value: getDefaultGraphicsShader(),
-            language: 'wgsl',
-        });
-        
-        // Create Audio editor
-        const audioContainer = document.getElementById('audioContainer');
-        state.audioEditor = monaco.editor.create(audioContainer, {
-            ...editorOptions,
-            value: getDefaultAudioShader(),
-            language: 'wgsl',
+                formatOnPaste: true,
+                formatOnType: true,
+                suggestOnTriggerCharacters: true,
+                acceptSuggestionOnEnter: 'on',
+                folding: true,
+                foldingStrategy: 'indentation',
+                renderWhitespace: 'selection',
+                renderControlCharacters: false,
+                scrollbar: {
+                    vertical: 'visible',
+                    horizontal: 'visible',
+                    useShadows: false,
+                    verticalHasArrows: false,
+                    horizontalHasArrows: false
+                }
         });
         
         // Create JavaScript editor 
         const jsContainer = document.getElementById('jsEditorContainer');
         state.jsEditor = monaco.editor.create(jsContainer, {
-            ...editorOptions,
             value: DEFAULT_JS,
             language: 'javascript',
+            theme: 'vs-dark',
+            fontSize: 13,
+            minimap: { enabled: false },
+            automaticLayout: true,
+            scrollBeyondLastLine: false,
+            wordWrap: 'on',
+            tabSize: 4,
+            insertSpaces: true,
+                formatOnPaste: true,
+                formatOnType: true,
+                suggestOnTriggerCharacters: true,
+                acceptSuggestionOnEnter: 'on',
+                folding: true,
+                foldingStrategy: 'indentation',
+                renderWhitespace: 'selection',
+                renderControlCharacters: false,
+                scrollbar: {
+                    vertical: 'visible',
+                    horizontal: 'visible',
+                    useShadows: false,
+                    verticalHasArrows: false,
+                    horizontalHasArrows: false
+                }
         });
         
-        // Keyboard shortcuts for all editors
+        // Keyboard shortcuts for both editors
         const addShortcuts = (editor) => {
             editor.addCommand(monaco.KeyCode.F5, () => reloadShader());
             editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => reloadShader());
             editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Space, () => togglePlayPause());
         };
-        addShortcuts(state.boilerplateEditor);
-        addShortcuts(state.graphicsEditor);
-        addShortcuts(state.audioEditor);
+        addShortcuts(monacoEditor);
         addShortcuts(state.jsEditor);
             
             // Set up error markers when shader compilation fails
@@ -656,16 +633,11 @@ function enterframe(state, api) {
                     endColumn: 1000,
                     message: err.message
                 }));
-                // Try to place marker in the relevant editor based on line number
-                // For now, clear all and show in graphics (could be smarter later)
-                monaco.editor.setModelMarkers(state.graphicsEditor.getModel(), 'wgsl', []);
-                monaco.editor.setModelMarkers(state.audioEditor.getModel(), 'wgsl', []);
-                monaco.editor.setModelMarkers(state.graphicsEditor.getModel(), 'wgsl', markers);
+                monaco.editor.setModelMarkers(monacoEditor.getModel(), 'wgsl', markers);
             };
             
             window.clearMonacoErrors = function() {
-                monaco.editor.setModelMarkers(state.graphicsEditor.getModel(), 'wgsl', []);
-                monaco.editor.setModelMarkers(state.audioEditor.getModel(), 'wgsl', []);
+                monaco.editor.setModelMarkers(monacoEditor.getModel(), 'wgsl', []);
             };
             
             // JS error markers
@@ -690,33 +662,21 @@ function enterframe(state, api) {
     }
 function switchTab(tab) {
     const tabs = document.querySelectorAll('.editorTab');
-    const containers = {
-        boilerplate: document.getElementById('boilerplateContainer'),
-        graphics: document.getElementById('graphicsContainer'),
-        audio: document.getElementById('audioContainer'),
-        js: document.getElementById('jsEditorContainer')
-    };
-    const editors = {
-        boilerplate: state.boilerplateEditor,
-        graphics: state.graphicsEditor,
-        audio: state.audioEditor,
-        js: state.jsEditor
-    };
+    const wgslContainer = document.getElementById('editorContainer');
+    const jsContainer = document.getElementById('jsEditorContainer');
     
-    // Remove active class from all tabs
     tabs.forEach(t => t.classList.remove('active'));
     
-    // Hide all containers
-    Object.values(containers).forEach(c => c.style.display = 'none');
-    
-    // Show selected tab and container
-    const tabMap = { boilerplate: 0, graphics: 1, audio: 2, js: 3 };
-    tabs[tabMap[tab]].classList.add('active');
-    containers[tab].style.display = 'block';
-    
-    // Force layout update for selected editor
-    if (editors[tab]) {
-        editors[tab].layout();
+    if (tab === 'wgsl') {
+        tabs[0].classList.add('active');
+        wgslContainer.style.display = 'block';
+        jsContainer.style.display = 'none';
+        monacoEditor.layout();
+    } else {
+        tabs[1].classList.add('active');
+        wgslContainer.style.display = 'none';
+        jsContainer.style.display = 'block';
+        state.jsEditor.layout();
     }
 }
 function parseJSError(err, codeLines) {
@@ -1072,14 +1032,7 @@ function togglePlayPause() {
 
     // Live Shader Reload
     async function reloadShader() {
-    // Compose full shader from boilerplate + graphics + audio
-    const boilerplate = getBoilerplate();  // Auto-generated
-    const graphics = state.graphicsEditor.getValue();
-    const audio = state.audioEditor.getValue();
-    const code = boilerplate + '\n' + graphics + '\n' + audio;
-    
-    // Update boilerplate editor to show latest auto-generated values
-    state.boilerplateEditor.setValue(boilerplate);
+    const code = monacoEditor.getValue();
     
     try {
         logStatus('Compiling shader...', 'info');
