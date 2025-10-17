@@ -549,7 +549,7 @@ function enterframe(state, api) {
     state.mouseY += (api.mouse.y - state.mouseY) * 0.1;
     
     // Change frequency
-    state.targetFreq = 440 + (1. + state.mouseX) * 100 ;
+    state.targetFreq = 440 + (1. + state.mouseX) * 220 ;
     
     // Optional: smooth frequency changes for even cleaner sound
     state.smoothFreq += (state.targetFreq - state.smoothFreq) * 0.3;
