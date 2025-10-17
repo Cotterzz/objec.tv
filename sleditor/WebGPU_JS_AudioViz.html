@@ -548,9 +548,8 @@ function enterframe(state, api) {
     state.mouseX += (api.mouse.x - state.mouseX) * 0.1;
     state.mouseY += (api.mouse.y - state.mouseY) * 0.1;
     
-    // Animate frequency - GPU handles phase automatically!
-    // No more clicks, tremolo, or timing issues!
-    state.targetFreq = 440 + Math.sin(api.time * 0.5) * 100;
+    // Change frequency
+    state.targetFreq = 440 + (1. + state.mouseX) * 100 ;
     
     // Optional: smooth frequency changes for even cleaner sound
     state.smoothFreq += (state.targetFreq - state.smoothFreq) * 0.3;
