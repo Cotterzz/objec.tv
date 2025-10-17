@@ -10,6 +10,7 @@
             background: #1e1e1e;
             color: #d4d4d4;
             font-family: system-ui, -apple-system, sans-serif;
+            overflow: hidden;
         }
         #editorTabs {
     display: flex;
@@ -23,7 +24,6 @@
     padding: 6px 12px;
     cursor: pointer;
     font-size: 13px;
-    border-radius: 4px 4px 0 0;
 }
 .editorTab.active {
     background: #1e1e1e;
@@ -52,7 +52,6 @@
         #editorContainer {
             flex: 1;
             border: 1px solid #3c3c3c;
-            border-radius: 4px;
             overflow: hidden;
             position: relative;
         }
@@ -75,7 +74,6 @@
             color: white;
             border: none;
             padding: 8px 16px;
-            border-radius: 4px;
             cursor: pointer;
             font-size: 14px;
             font-weight: 500;
@@ -99,7 +97,6 @@
         #errorDisplay {
             background: #1e1e1e;
             border: 1px solid #3c3c3c;
-            border-radius: 4px;
             padding: 10px;
             font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
             font-size: 12px;
@@ -112,7 +109,6 @@
         .info { color: #9cdcfe; }
         #canvas {
             border: 1px solid #3c3c3c;
-            border-radius: 4px;
             image-rendering: pixelated;
         }
         .hint {
@@ -122,7 +118,6 @@
         .statusBadge {
             display: inline-block;
             padding: 2px 8px;
-            border-radius: 3px;
             font-size: 11px;
             font-weight: bold;
         }
@@ -139,28 +134,20 @@
 <body>
     <div id="container">
         <div id="leftPanel">
-            <div id="controls">
-                <button id="playPauseBtn" class="paused">▶ Play</button>
-                <button id="reloadBtn">Reload Shader (F5/Ctrl+S)</button>
-                <label style="color: #858585;">
-                    Volume: <input type="range" id="volumeSlider" min="0" max="100" value="50" style="width: 100px;">
-                    <span id="volumeValue">50%</span>
-                </label>
-            </div>
 <div id="editorTabs">
     <button class="editorTab active" onclick="switchTab('boilerplate')">📄 Boilerplate</button>
     <button class="editorTab" onclick="switchTab('graphics')">🎨 Graphics</button>
     <button class="editorTab" onclick="switchTab('audio')">🔊 Audio</button>
     <button class="editorTab" onclick="switchTab('js')">⚡ JavaScript</button>
 </div>
-<div id="boilerplateContainer" style="flex: 1; border: 1px solid #3c3c3c; border-radius: 4px; overflow: hidden;">
+<div id="boilerplateContainer" style="flex: 1; border: 1px solid #3c3c3c; overflow: hidden;">
     <div id="loadingMessage">Loading Monaco Editor...</div>
 </div>
-<div id="graphicsContainer" style="flex: 1; border: 1px solid #3c3c3c; border-radius: 4px; overflow: hidden; display: none;">
+<div id="graphicsContainer" style="flex: 1; border: 1px solid #3c3c3c; overflow: hidden; display: none;">
 </div>
-<div id="audioContainer" style="flex: 1; border: 1px solid #3c3c3c; border-radius: 4px; overflow: hidden; display: none;">
+<div id="audioContainer" style="flex: 1; border: 1px solid #3c3c3c; overflow: hidden; display: none;">
 </div>
-<div id="jsEditorContainer" style="flex: 1; border: 1px solid #3c3c3c; border-radius: 4px; overflow: hidden; display: none;">
+<div id="jsEditorContainer" style="flex: 1; border: 1px solid #3c3c3c; overflow: hidden; display: none;">
 </div>
             <div>
                 <div class="hint">Status:</div>
@@ -169,8 +156,15 @@
         </div>
         <div id="rightPanel">
             <canvas id="canvas"></canvas>
+            <div id="controls">
+                <button id="playPauseBtn" class="paused">▶</button>
+                <button id="reloadBtn">⟳</button>
+                <label style="color: #858585;">
+                    Volume: <input type="range" id="volumeSlider" min="0" max="100" value="50" style="width: 100px;">
+                    <span id="volumeValue">50%</span>
+                </label>
+            </div>
             <div class="hint">
-                Audio: <span id="audioStatus" class="statusBadge paused">⏸ PAUSED</span><br>
                 Frame: <span id="frameCounter">0</span><br>
                 Time: <span id="timeCounter">0.00s</span>
             </div>
@@ -840,7 +834,7 @@ return { init, enterframe };
                         
                         const btn = document.getElementById('playPauseBtn');
                         if (btn) {
-                            btn.textContent = '▶ Play';
+                            btn.textContent = '▶';
                             btn.className = 'paused';
                         }
                     }
@@ -924,15 +918,12 @@ function togglePlayPause() {
     if (!state.audioContext) return;
     
     const btn = document.getElementById('playPauseBtn');
-    const statusBadge = document.getElementById('audioStatus');
     
     if (state.isPlaying) {
         state.audioContext.suspend();
         state.isPlaying = false;
-        btn.textContent = '▶ Play';
+        btn.textContent = '▶';
         btn.className = 'paused';
-        statusBadge.textContent = '⏸ PAUSED';
-        statusBadge.className = 'statusBadge paused';
         logStatus('Audio paused', 'info');
     } else {
         // Compile and initialize user JS
@@ -971,10 +962,8 @@ function togglePlayPause() {
                              * CONFIG.audioBlockDuration;
         state.pendingAudio = false;
         
-        btn.textContent = '⏸ Pause';
+        btn.textContent = '⏸';
         btn.className = 'playing';
-        statusBadge.textContent = '▶ PLAYING';
-        statusBadge.className = 'statusBadge playing';
     }
 }
 
@@ -1189,12 +1178,8 @@ function togglePlayPause() {
             state.audioContext.suspend();
             
             const btn = document.getElementById('playPauseBtn');
-            btn.textContent = '▶ Play';
+            btn.textContent = '▶';
             btn.className = 'paused';
-            
-            const statusBadge = document.getElementById('audioStatus');
-            statusBadge.textContent = '⏸ PAUSED';
-            statusBadge.className = 'statusBadge paused';
             
             // Show error with line number
             const code = state.jsEditor.getValue();
