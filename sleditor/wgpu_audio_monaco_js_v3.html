@@ -134,14 +134,17 @@
 <body>
     <div id="container">
         <div id="leftPanel">
-<div id="editorTabs" style="display: flex; gap: 5px; margin-bottom: 5px; align-items: center;">
-    <!-- Tabs will be dynamically added here -->
-    <button id="addPassBtn" style="padding: 6px 12px; font-size: 13px; margin-left: auto;">+ Add Pass</button>
+<div id="editorTabs">
+    <button class="editorTab active" onclick="switchTab('boilerplate')">📄 Boilerplate</button>
+    <button class="editorTab" onclick="switchTab('graphics')">🎨 Graphics</button>
+    <button class="editorTab" onclick="switchTab('audio')">🔊 Audio</button>
+    <button class="editorTab" onclick="switchTab('js')">⚡ JavaScript</button>
+    <button class="editorTab" onclick="switchTab('help')">❓ Help</button>
 </div>
-<div id="boilerplateContainer" style="flex: 1; border: 1px solid #3c3c3c; overflow: hidden; display: none;">
-</div>
-<div id="graphicsContainer" style="flex: 1; border: 1px solid #3c3c3c; overflow: hidden;">
+<div id="boilerplateContainer" style="flex: 1; border: 1px solid #3c3c3c; overflow: hidden;">
     <div id="loadingMessage">Loading Monaco Editor...</div>
+</div>
+<div id="graphicsContainer" style="flex: 1; border: 1px solid #3c3c3c; overflow: hidden; display: none;">
 </div>
 <div id="audioContainer" style="flex: 1; border: 1px solid #3c3c3c; overflow: hidden; display: none;">
 </div>
@@ -157,9 +160,8 @@
         <div id="rightPanel">
             <canvas id="canvas"></canvas>
             <div id="controls">
-                <button id="playPauseBtn" class="playing">⏸</button>
-                <button id="restartBtn" title="Restart from beginning">⟳</button>
-                <button id="reloadBtn" title="Reload shaders">⚙</button>
+                <button id="playPauseBtn" class="paused">▶</button>
+                <button id="reloadBtn">⟳</button>
                 <label style="color: #858585;">
                     Volume: <input type="range" id="volumeSlider" min="0" max="100" value="50" style="width: 100px;">
                     <span id="volumeValue">50%</span>
@@ -168,12 +170,6 @@
             <div class="hint">
                 Frame: <span id="frameCounter">0</span><br>
                 Time: <span id="timeCounter">0.00s</span>
-            </div>
-            <div style="display: flex; gap: 5px; align-items: center; margin-top: 10px;">
-                <label style="color: #858585; font-size: 13px;">Example:</label>
-                <select id="exampleSelector" style="background: #2d2d2d; color: #d4d4d4; border: 1px solid #3c3c3c; padding: 4px 8px; font-size: 13px; cursor: pointer; flex: 1;">
-                    <!-- Populated by JS -->
-                </select>
             </div>
         </div>
     </div>
@@ -348,17 +344,13 @@
         audioBuffersReadback: [null, null],
         
         lastFrameTime: 0,
-        visualFrame: 0,        // Visual frame counter (increments every render)
-        audioFrame: 0,         // Audio frame counter (increments when audio generated)
+        audioFrame: 0,
         nextAudioTime: 0,
-        startTime: 0,          // When animation started (for time offset)
-        pausedTime: 0,         // Total time spent paused
-        lastPauseTime: 0,      // When we last paused
         
         readbackIndex: 0,
         pendingAudio: false,
-        isRunning: false,      // System initialized and ready
-        isPlaying: true,       // Currently playing (default true)
+        isRunning: false,
+        isPlaying: false,
     
         // Monaco editors
         boilerplateEditor: null,
@@ -367,16 +359,11 @@
         jsEditor: null,
         helpEditor: null,
         
-        // Active tabs and current example
-        activeTabs: ['graphics', 'help'],  // Start with just these
-        currentTab: 'graphics',
-        currentExample: 'hello_world',
-        
         userState: null,
         userInit: null,
         userEnterframe: null,
-        mouseX: 0.5,
-        mouseY: 0.5,
+        mouseX: 0,
+        mouseY: 0,
 };
 
 
@@ -539,30 +526,6 @@ fn audio_main(@builtin(global_invocation_id) gid: vec3<u32>) {
 `;
 }
 
-// Minimal starter code for when user adds a new tab
-const MINIMAL_JS = `function init() {
-    return {};
-}
-
-function enterframe(state, api) {
-    // Pass mouse position to shader
-    api.uniforms.setFloat(5, api.mouse.x);
-    api.uniforms.setFloat(6, api.mouse.y);
-}`;
-
-const MINIMAL_AUDIO = `// Simple sine wave
-@compute @workgroup_size(128, 1, 1)
-fn audio_main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let sampleIndex = i32(gid.x);
-    if (sampleIndex >= SAMPLES_PER_BLOCK) { return; }
-    
-    let t = f32(sampleIndex) / SAMPLE_RATE;
-    let sample = sin(t * 440.0 * TAU) * 0.3;
-    
-    audioBuffer[sampleIndex] = sample;
-    audioBuffer[SAMPLES_PER_BLOCK + sampleIndex] = sample;
-}`;
-
 const DEFAULT_JS = `// This code runs alongside your WGSL shader
 // Use 'state' to persist data between frames
 
@@ -599,200 +562,6 @@ function enterframe(state, api) {
     // api.uniforms.setFloat(8, someValue);
     // api.uniforms.setFloat(9, anotherValue);
 }`;
-
-// ============================================================================
-// EXAMPLES LIBRARY
-// ============================================================================
-
-const EXAMPLES = {
-    hello_world: {
-        name: "Hello World",
-        description: "A simple gradient",
-        tabs: ["graphics", "help"],
-        graphics: `// Simple gradient - your first shader!
-@compute @workgroup_size(8, 8, 1)
-fn graphics_main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    if (gid.x >= u32(SCREEN_SIZE) || gid.y >= u32(SCREEN_SIZE)) {
-        return;
-    }
-    
-    let uv = vec2f(gid.xy) / f32(SCREEN_SIZE);
-    let color = vec3f(uv.x, uv.y, 0.5);
-    
-    textureStore(screenTexture, gid.xy, vec4f(color, 1.0));
-}`,
-        audio: null,
-        js: null
-    },
-    
-    animated_pattern: {
-        name: "Animated Pattern",
-        description: "Time-based animation",
-        tabs: ["graphics"],
-        graphics: `// Animated pattern using time
-@compute @workgroup_size(8, 8, 1)
-fn graphics_main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    if (gid.x >= u32(SCREEN_SIZE) || gid.y >= u32(SCREEN_SIZE)) {
-        return;
-    }
-    
-    let uv = vec2f(gid.xy) / f32(SCREEN_SIZE);
-    let t = uniforms.time;
-    
-    // Rotating pattern
-    let angle = atan2(uv.y - 0.5, uv.x - 0.5);
-    let radius = length(uv - 0.5);
-    let pattern = sin(angle * 5.0 + t) * cos(radius * 20.0 - t * 2.0);
-    
-    let color = vec3f(
-        pattern * 0.5 + 0.5,
-        sin(t * 0.5) * 0.5 + 0.5,
-        cos(t * 0.3) * 0.5 + 0.5
-    );
-    
-    textureStore(screenTexture, gid.xy, vec4f(color, 1.0));
-}`,
-        audio: null,
-        js: null
-    },
-    
-    mouse_interactive: {
-        name: "Mouse Interactive",
-        description: "Mouse controls the pattern",
-        tabs: ["graphics", "js"],
-        graphics: `// Mouse-controlled visuals
-@compute @workgroup_size(8, 8, 1)
-fn graphics_main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    if (gid.x >= u32(SCREEN_SIZE) || gid.y >= u32(SCREEN_SIZE)) {
-        return;
-    }
-    
-    let uv = vec2f(gid.xy) / f32(SCREEN_SIZE);
-    let mouse = vec2f(uniforms.mouseX, 1.0-uniforms.mouseY);
-    let t = uniforms.time;
-    
-    // Distance from mouse
-    let dist = length(uv - mouse);
-    
-    // Ripple effect
-    let ripple = sin(dist * 20.0 - t * 3.0) * 0.5 + 0.5;
-    
-    // Color based on distance and time
-    let color = vec3f(
-        ripple * (1.0 - dist),
-        dist,
-        sin(t + dist * 5.0) * 0.5 + 0.5
-    );
-    
-    textureStore(screenTexture, gid.xy, vec4f(color, 1.0));
-}`,
-        audio: null,
-        js: `function init() {
-    return {
-        mouseX: 0.5,
-        mouseY: 0.5,
-    };
-}
-
-function enterframe(state, api) {
-    // Smooth mouse tracking
-    state.mouseX += (api.mouse.x - state.mouseX) * 0.1;
-    state.mouseY += (api.mouse.y - state.mouseY) * 0.1;
-    
-    api.uniforms.setFloat(5, state.mouseX);
-    api.uniforms.setFloat(6, state.mouseY);
-}`
-    },
-    
-    simple_tone: {
-        name: "Simple Tone",
-        description: "Basic audio synthesis",
-        tabs: ["graphics", "audio", "js"],
-        graphics: `// Visualize the frequency
-@compute @workgroup_size(8, 8, 1)
-fn graphics_main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    if (gid.x >= u32(SCREEN_SIZE) || gid.y >= u32(SCREEN_SIZE)) {
-        return;
-    }
-    
-    let uv = vec2f(gid.xy) / f32(SCREEN_SIZE);
-    let freq = uniforms.frequency;
-    
-    // Frequency visualization
-    let normalizedFreq = (freq - 220.0) / 660.0;  // Range: 220-880 Hz
-    let freqLine = smoothstep(0.02, 0.01, abs(uv.y - normalizedFreq));
-    
-    // Background gradient
-    var color = vec3f(uv.x * 0.2, uv.y * 0.2, 0.3);
-    
-    // Frequency indicator line
-    color += vec3f(0.0, 1.0, 0.5) * freqLine;
-    
-    textureStore(screenTexture, gid.xy, vec4f(color, 1.0));
-}`,
-        audio: `// Simple sine wave tone
-@compute @workgroup_size(128, 1, 1)
-fn audio_main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let sampleIndex = i32(gid.x);
-    
-    if (sampleIndex >= SAMPLES_PER_BLOCK) {
-        return;
-    }
-    
-    // GPU-side phase accumulation
-    let basePhase = phaseState[0];
-    let phaseIncrement = uniforms.frequency * TAU / SAMPLE_RATE;
-    var phase = basePhase + f32(sampleIndex) * phaseIncrement;
-    
-    // Generate sine wave
-    let sample = sin(phase) * 0.3;
-    
-    // Write stereo
-    audioBuffer[sampleIndex] = sample;
-    audioBuffer[SAMPLES_PER_BLOCK + sampleIndex] = sample;
-    
-    // Update phase state (last thread only)
-    if (sampleIndex == SAMPLES_PER_BLOCK - 1) {
-        var finalPhase = basePhase + f32(SAMPLES_PER_BLOCK) * phaseIncrement;
-        while (finalPhase >= TAU) {
-            finalPhase -= TAU;
-        }
-        while (finalPhase < 0.0) {
-            finalPhase += TAU;
-        }
-        phaseState[0] = finalPhase;
-    }
-}`,
-        js: `function init() {
-    return {
-        mouseX: 0.5,
-        mouseY: 0.5,
-        frequency: 440,
-    };
-}
-
-function enterframe(state, api) {
-    state.mouseX += (api.mouse.x - state.mouseX) * 0.1;
-    state.mouseY += (api.mouse.y - state.mouseY) * 0.1;
-    
-    // Mouse X controls frequency (220-880 Hz)
-    state.frequency = 220 + state.mouseX * 660;
-    
-    api.uniforms.setFloat(5, state.mouseX);
-    api.uniforms.setFloat(6, state.mouseY);
-    api.uniforms.setFloat(7, state.frequency);
-}`
-    },
-    
-    waveform_viz: {
-        name: "Waveform Visualizer",
-        description: "Multi-scale audio visualization (complex)",
-        tabs: ["graphics", "audio", "js", "boilerplate"],
-        graphics: getDefaultGraphicsShader(),
-        audio: getDefaultAudioShader(),
-        js: DEFAULT_JS
-    }
-};
 
 function getHelpContent() {
     return `WEBGPU COMPUTE SHADER EDITOR - QUICK START GUIDE
@@ -1326,7 +1095,7 @@ alias MyArray = array<f32, 16>;`;
         const graphicsContainer = document.getElementById('graphicsContainer');
         state.graphicsEditor = monaco.editor.create(graphicsContainer, {
             ...editorOptions,
-            value: EXAMPLES[state.currentExample].graphics || '',
+            value: getDefaultGraphicsShader(),
             language: 'wgsl',
         });
         
@@ -1334,7 +1103,7 @@ alias MyArray = array<f32, 16>;`;
         const audioContainer = document.getElementById('audioContainer');
         state.audioEditor = monaco.editor.create(audioContainer, {
             ...editorOptions,
-            value: EXAMPLES[state.currentExample].audio || MINIMAL_AUDIO,
+            value: getDefaultAudioShader(),
             language: 'wgsl',
         });
         
@@ -1342,7 +1111,7 @@ alias MyArray = array<f32, 16>;`;
         const jsContainer = document.getElementById('jsEditorContainer');
         state.jsEditor = monaco.editor.create(jsContainer, {
             ...editorOptions,
-            value: EXAMPLES[state.currentExample].js || MINIMAL_JS,
+            value: DEFAULT_JS,
             language: 'javascript',
         });
         
@@ -1411,75 +1180,8 @@ alias MyArray = array<f32, 16>;`;
             callback();
         });
     }
-// ============================================================================
-// TAB MANAGEMENT
-// ============================================================================
-
-function getTabIcon(tabName) {
-    const icons = {
-        boilerplate: '📄',
-        graphics: '🎨',
-        audio: '🔊',
-        js: '⚡',
-        help: '❓'
-    };
-    return icons[tabName] || '📝';
-}
-
-function getTabLabel(tabName) {
-    const labels = {
-        boilerplate: 'Boilerplate',
-        graphics: 'Graphics',
-        audio: 'Audio',
-        js: 'JavaScript',
-        help: 'Help'
-    };
-    return labels[tabName] || tabName;
-}
-
-function renderTabs() {
-    const tabsContainer = document.getElementById('editorTabs');
-    
-    // Remove all tab buttons but keep the "+ Add Pass" button
-    const addPassBtn = document.getElementById('addPassBtn');
-    tabsContainer.innerHTML = '';
-    
-    // Add tab buttons
-    state.activeTabs.forEach(tabName => {
-        const button = document.createElement('button');
-        button.className = 'editorTab' + (state.currentTab === tabName ? ' active' : '');
-        button.textContent = `${getTabIcon(tabName)} ${getTabLabel(tabName)}`;
-        button.onclick = () => switchTab(tabName);
-        
-        // Add close button for removable tabs (only graphics is mandatory)
-        if (tabName !== 'graphics') {
-            const closeBtn = document.createElement('span');
-            closeBtn.textContent = ' ×';
-            closeBtn.style.marginLeft = '6px';
-            closeBtn.style.cursor = 'pointer';
-            closeBtn.onclick = (e) => {
-                e.stopPropagation();
-                removeTab(tabName);
-            };
-            button.appendChild(closeBtn);
-        }
-        
-        tabsContainer.appendChild(button);
-    });
-    
-    // Re-add the "+ Add Pass" button at the end
-    if (addPassBtn) {
-        tabsContainer.appendChild(addPassBtn);
-    }
-}
-
-function switchTab(tabName) {
-    if (!state.activeTabs.includes(tabName)) {
-        return;
-    }
-    
-    state.currentTab = tabName;
-    
+function switchTab(tab) {
+    const tabs = document.querySelectorAll('.editorTab');
     const containers = {
         boilerplate: document.getElementById('boilerplateContainer'),
         graphics: document.getElementById('graphicsContainer'),
@@ -1487,7 +1189,6 @@ function switchTab(tabName) {
         js: document.getElementById('jsEditorContainer'),
         help: document.getElementById('helpContainer')
     };
-    
     const editors = {
         boilerplate: state.boilerplateEditor,
         graphics: state.graphicsEditor,
@@ -1496,206 +1197,22 @@ function switchTab(tabName) {
         help: state.helpEditor
     };
     
+    // Remove active class from all tabs
+    tabs.forEach(t => t.classList.remove('active'));
+    
     // Hide all containers
     Object.values(containers).forEach(c => c.style.display = 'none');
     
-    // Show selected container
-    if (containers[tabName]) {
-        containers[tabName].style.display = 'block';
-    }
+    // Show selected tab and container
+    const tabMap = { boilerplate: 0, graphics: 1, audio: 2, js: 3, help: 4 };
+    tabs[tabMap[tab]].classList.add('active');
+    containers[tab].style.display = 'block';
     
-    // Force layout update
-    if (editors[tabName]) {
-        editors[tabName].layout();
-    }
-    
-    // Update tab buttons
-    renderTabs();
-}
-
-function addTab(tabName) {
-    if (state.activeTabs.includes(tabName)) {
-        switchTab(tabName);
-        return;
-    }
-    
-    state.activeTabs.push(tabName);
-    
-    // If adding a tab that the current example doesn't have, populate with minimal starter code
-    const currentExample = EXAMPLES[state.currentExample];
-    
-    if (tabName === 'js' && !currentExample.js && state.jsEditor) {
-        state.jsEditor.setValue(MINIMAL_JS);
-    } else if (tabName === 'audio' && !currentExample.audio && state.audioEditor) {
-        state.audioEditor.setValue(MINIMAL_AUDIO);
-    }
-    
-    renderTabs();
-    switchTab(tabName);
-    
-    // If we just added audio or js, reload the shader/script
-    if ((tabName === 'audio' || tabName === 'js') && state.isRunning) {
-        reloadShader();
+    // Force layout update for selected editor
+    if (editors[tab]) {
+        editors[tab].layout();
     }
 }
-
-function removeTab(tabName) {
-    // Can't remove graphics (it's mandatory)
-    if (tabName === 'graphics') {
-        return;
-    }
-    
-    const index = state.activeTabs.indexOf(tabName);
-    if (index === -1) return;
-    
-    state.activeTabs.splice(index, 1);
-    
-    // If we removed the current tab, switch to another
-    if (state.currentTab === tabName) {
-        switchTab(state.activeTabs[Math.max(0, index - 1)]);
-    }
-    
-    renderTabs();
-}
-
-function showAddPassMenu() {
-    const btn = document.getElementById('addPassBtn');
-    
-    // Create menu if it doesn't exist
-    let menu = document.getElementById('addPassMenu');
-    if (!menu) {
-        menu = document.createElement('div');
-        menu.id = 'addPassMenu';
-        menu.style.cssText = `
-            position: absolute;
-            background: #2d2d2d;
-            border: 1px solid #3c3c3c;
-            padding: 4px;
-            z-index: 1000;
-            display: none;
-        `;
-        document.body.appendChild(menu);
-    }
-    
-    // Build menu options - all available tabs except graphics (always present)
-    const availableTabs = [
-        { name: 'boilerplate', label: '📄 Boilerplate' },
-        { name: 'audio', label: '🔊 Audio' },
-        { name: 'js', label: '⚡ JavaScript' },
-        { name: 'help', label: '❓ Help' }
-    ];
-    
-    menu.innerHTML = '';
-    availableTabs.forEach(tab => {
-        const isActive = state.activeTabs.includes(tab.name);
-        const option = document.createElement('div');
-        option.textContent = tab.label + (isActive ? ' ✓' : '');
-        option.style.cssText = `
-            padding: 6px 12px;
-            cursor: ${isActive ? 'default' : 'pointer'};
-            color: ${isActive ? '#666' : '#d4d4d4'};
-            pointer-events: ${isActive ? 'none' : 'auto'};
-        `;
-        option.onmouseenter = () => {
-            if (!isActive) {
-                option.style.background = '#1e1e1e';
-            }
-        };
-        option.onmouseleave = () => {
-            option.style.background = 'transparent';
-        };
-        option.onclick = () => {
-            addTab(tab.name);
-            menu.style.display = 'none';
-        };
-        menu.appendChild(option);
-    });
-    
-    // Position menu below button
-    const rect = btn.getBoundingClientRect();
-    menu.style.left = rect.left + 'px';
-    menu.style.top = (rect.bottom + 2) + 'px';
-    menu.style.display = 'block';
-    
-    // Close menu when clicking outside
-    const closeMenu = (e) => {
-        if (!menu.contains(e.target) && e.target !== btn) {
-            menu.style.display = 'none';
-            document.removeEventListener('click', closeMenu);
-        }
-    };
-    setTimeout(() => document.addEventListener('click', closeMenu), 0);
-}
-// ============================================================================
-// EXAMPLE MANAGEMENT
-// ============================================================================
-
-function populateExampleSelector() {
-    const selector = document.getElementById('exampleSelector');
-    selector.innerHTML = '';
-    
-    Object.keys(EXAMPLES).forEach(exampleId => {
-        const example = EXAMPLES[exampleId];
-        const option = document.createElement('option');
-        option.value = exampleId;
-        option.textContent = example.name;
-        option.title = example.description;
-        selector.appendChild(option);
-    });
-    
-    selector.value = state.currentExample;
-    selector.addEventListener('change', (e) => {
-        loadExample(e.target.value);
-    });
-}
-
-function loadExample(exampleId) {
-    const example = EXAMPLES[exampleId];
-    if (!example) return;
-    
-    state.currentExample = exampleId;
-    
-    // Update active tabs to match example
-    state.activeTabs = [...example.tabs];
-    
-    // Load code into editors (or set to minimal if example doesn't have it)
-    if (state.graphicsEditor) {
-        state.graphicsEditor.setValue(example.graphics || '');
-    }
-    if (state.audioEditor) {
-        state.audioEditor.setValue(example.audio || MINIMAL_AUDIO);
-    }
-    if (state.jsEditor) {
-        state.jsEditor.setValue(example.js || MINIMAL_JS);
-    }
-    
-    // Update UI
-    renderTabs();
-    
-    // Switch to graphics tab by default
-    if (state.activeTabs.includes('graphics')) {
-        switchTab('graphics');
-    } else if (state.activeTabs.length > 0) {
-        switchTab(state.activeTabs[0]);
-    }
-    
-    // Reload shader with new code, then restart and auto-play
-    if (state.isRunning) {
-        reloadShader().then(() => {
-            // Restart from beginning and ensure playing
-            restart();
-            if (!state.isPlaying) {
-                state.isPlaying = true;
-                state.audioContext.resume();
-                updatePlayPauseButton();
-            }
-            logStatus(`Loaded example: ${example.name}`, 'success');
-        });
-    } else {
-        logStatus(`Loaded example: ${example.name}`, 'success');
-    }
-}
-
 function parseJSError(err, codeLines) {
     // Extract line number from error message or stack
     let lineNum = 1;
@@ -1732,31 +1249,12 @@ function parseJSError(err, codeLines) {
     return { lineNum, column, endColumn, message: err.message };
 }
 
-// Default JS that runs when JS tab is not visible
-const INVISIBLE_DEFAULT_JS = `
-function init() {
-    return { mouseX: 0.5, mouseY: 0.5 };
-}
-
-function enterframe(state, api) {
-    // Smooth mouse tracking
-    state.mouseX += (api.mouse.x - state.mouseX) * 0.1;
-    state.mouseY += (api.mouse.y - state.mouseY) * 0.1;
-    
-    // Pass to uniforms
-    api.uniforms.setFloat(5, state.mouseX);
-    api.uniforms.setFloat(6, state.mouseY);
-}
-`;
-
 function compileUserJS() {
-    // If JS tab is not active, use invisible default
-    const useDefault = !state.activeTabs.includes('js');
-    const code = useDefault ? INVISIBLE_DEFAULT_JS : state.jsEditor.getValue();
+    const code = state.jsEditor.getValue();
     const codeLines = code.split('\n').length;
     
     try {
-        if (!useDefault) clearJSErrors();
+        clearJSErrors();
         
         // Create a safe scope and eval the user's code
         // We add one newline before user code to make line numbers match
@@ -1770,17 +1268,9 @@ return { init, enterframe };
         state.userInit = userFunctions.init;
         state.userEnterframe = userFunctions.enterframe;
         
-        if (!useDefault) {
-            logStatus('✓ JavaScript compiled successfully', 'success');
-        }
+        logStatus('✓ JavaScript compiled successfully', 'success');
         return true;
     } catch (err) {
-        if (useDefault) {
-            // Default JS should never fail, but if it does, log and continue
-            console.error('Default JS compilation failed:', err);
-            return false;
-        }
-        
         const errorInfo = parseJSError(err, codeLines);
         
         setJSErrors([{
@@ -1876,15 +1366,8 @@ return { init, enterframe };
                 await initWebGPU();
                 await reloadShader();
                 state.isRunning = true;
-                
-                // Auto-play from beginning
-                restart();
-                state.isPlaying = true;
-                state.audioContext.resume();
-                updatePlayPauseButton();
-                
                 requestAnimationFrame(render);
-                logStatus('Ready! Animation playing.', 'success');
+                logStatus('System initialized! Press Play to start audio.', 'success');
             } catch (err) {
                 logStatus('Initialization failed: ' + err.message, 'error');
             }
@@ -1901,15 +1384,9 @@ return { init, enterframe };
 
         // Play/Pause button
         document.getElementById('playPauseBtn').addEventListener('click', togglePlayPause);
-        
-        // Restart button
-        document.getElementById('restartBtn').addEventListener('click', restart);
 
         // Reload button
         document.getElementById('reloadBtn').addEventListener('click', reloadShader);
-        
-        // Add Pass button
-        document.getElementById('addPassBtn').addEventListener('click', showAddPassMenu);
 
         // Volume control
         const volumeSlider = document.getElementById('volumeSlider');
@@ -1920,14 +1397,12 @@ return { init, enterframe };
             if (state.gainNode) state.gainNode.gain.value = vol;
             volumeValue.textContent = e.target.value + '%';
         });
-        
-        // Track mouse position
-        document.addEventListener('mousemove', (e) => {
-            const rect = state.canvas.getBoundingClientRect();
-            state.mouseX = (e.clientX - rect.left) / rect.width;
-            state.mouseY = 1.0 - (e.clientY - rect.top) / rect.height; // Flip Y
-        });
-        
+    // ADD THIS - Track mouse position
+    document.addEventListener('mousemove', (e) => {
+        const rect = state.canvas.getBoundingClientRect();
+        state.mouseX = (e.clientX - rect.left) / rect.width;
+        state.mouseY = 1.0 - (e.clientY - rect.top) / rect.height; // Flip Y
+    });
         // Handle visibility change
         document.addEventListener('visibilitychange', () => {
             if (!document.hidden && state.audioContext && state.isPlaying) {
@@ -1938,115 +1413,58 @@ return { init, enterframe };
                 logStatus('Audio resynced after visibility change', 'info');
             }
         });
-        
-        // Initialize example selector
-        populateExampleSelector();
-        
-        // Initialize tab display
-        renderTabs();
     }
 
 function togglePlayPause() {
-    if (!state.audioContext || !state.isRunning) return;
+    if (!state.audioContext) return;
+    
+    const btn = document.getElementById('playPauseBtn');
     
     if (state.isPlaying) {
-        // PAUSE everything
         state.audioContext.suspend();
         state.isPlaying = false;
-        state.lastPauseTime = performance.now();
-        logStatus('Paused', 'info');
-    } else {
-        // RESUME everything
-        state.audioContext.resume();
-        state.isPlaying = true;
-        
-        // Account for time spent paused
-        if (state.lastPauseTime > 0) {
-            state.pausedTime += performance.now() - state.lastPauseTime;
-        }
-        
-        // Resync audio timing
-        const ctx = state.audioContext;
-        state.nextAudioTime = Math.ceil(ctx.currentTime / CONFIG.audioBlockDuration) 
-                             * CONFIG.audioBlockDuration;
-        state.pendingAudio = false;
-        
-        logStatus('Playing', 'success');
-    }
-    
-    updatePlayPauseButton();
-}
-
-function updatePlayPauseButton() {
-    const btn = document.getElementById('playPauseBtn');
-    if (state.isPlaying) {
-        btn.textContent = '⏸';
-        btn.className = 'playing';
-    } else {
         btn.textContent = '▶';
         btn.className = 'paused';
-    }
-}
-
-function restart() {
-    // Reset time tracking
-    const now = performance.now();
-    state.startTime = now;
-    state.pausedTime = 0;
-    state.visualFrame = 0;
-    state.audioFrame = 0;
-    
-    // If currently paused, set lastPauseTime to now so time doesn't accumulate while paused
-    if (!state.isPlaying) {
-        state.lastPauseTime = now;
+        logStatus('Audio paused', 'info');
     } else {
-        state.lastPauseTime = 0;
-    }
-    
-    // Reset GPU phase for clean audio start
-    if (state.gpuDevice && state.phaseStateBuffer) {
-        state.gpuDevice.queue.writeBuffer(state.phaseStateBuffer, 0, new Float32Array([0.0]));
-    }
-    
-    // Resync audio timing
-    if (state.audioContext) {
-        const ctx = state.audioContext;
-        state.nextAudioTime = Math.ceil(ctx.currentTime / CONFIG.audioBlockDuration) 
-                             * CONFIG.audioBlockDuration;
-        state.pendingAudio = false;
-    }
-    
-    // Compile and initialize JS
-    if (compileUserJS()) {
-        try {
-            state.userState = state.userInit ? state.userInit() : {};
-            clearJSErrors();
-            logStatus('Restarted from beginning', 'success');
-        } catch (err) {
-            const code = state.jsEditor?.getValue() || INVISIBLE_DEFAULT_JS;
-            const codeLines = code.split('\n').length;
-            const errorInfo = parseJSError(err, codeLines);
-            
-            if (state.jsEditor && state.activeTabs.includes('js')) {
+        // Compile and initialize user JS
+        if (compileUserJS()) {
+            try {
+                state.userState = state.userInit ? state.userInit() : {};
+                clearJSErrors(); // Clear any previous runtime errors
+                logStatus('✓ JS initialized successfully', 'success');
+            } catch (err) {
+                const code = state.jsEditor.getValue();
+                const codeLines = code.split('\n').length;
+                const errorInfo = parseJSError(err, codeLines);
+                
                 setJSErrors([{
                     lineNum: errorInfo.lineNum,
                     column: errorInfo.column,
                     endColumn: errorInfo.endColumn,
                     message: `Runtime error in init(): ${errorInfo.message}`
                 }]);
+                
+                logStatus(`✗ JS init() error (line ${errorInfo.lineNum}): ${err.message}`, 'error');
+                return;
             }
-            
-            logStatus(`✗ JS init() error (line ${errorInfo.lineNum}): ${err.message}`, 'error');
+        } else {
+            return; // Don't start if JS compilation failed
         }
-    }
-    
-    // Update display immediately to show t=0
-    document.getElementById('frameCounter').textContent = '0';
-    document.getElementById('timeCounter').textContent = '0.00s';
-    
-    // If paused, render one frame to show the restart visually
-    if (!state.isPlaying && state.isRunning) {
-        renderSingleFrame();
+        
+        state.audioContext.resume();
+        state.isPlaying = true;
+        
+        // Reset GPU phase to 0 for clean start
+        state.gpuDevice.queue.writeBuffer(state.phaseStateBuffer, 0, new Float32Array([0.0]));
+        
+        const ctx = state.audioContext;
+        state.nextAudioTime = Math.ceil(ctx.currentTime / CONFIG.audioBlockDuration) 
+                             * CONFIG.audioBlockDuration;
+        state.pendingAudio = false;
+        
+        btn.textContent = '⏸';
+        btn.className = 'playing';
     }
 }
 
@@ -2141,20 +1559,19 @@ function restart() {
         state.audioContext.suspend();
     }
 
-    // Live Shader Reload - no time reset, no init() call
+    // Live Shader Reload
     async function reloadShader() {
-    // Compose full shader from boilerplate + graphics + audio (if available)
+    // Compose full shader from boilerplate + graphics + audio
     const boilerplate = getBoilerplate();  // Auto-generated
     const graphics = state.graphicsEditor.getValue();
-    const hasAudio = state.activeTabs.includes('audio');
-    const audio = hasAudio ? state.audioEditor.getValue() : '';
+    const audio = state.audioEditor.getValue();
     const code = boilerplate + '\n' + graphics + '\n' + audio;
     
     // Update boilerplate editor to show latest auto-generated values
     state.boilerplateEditor.setValue(boilerplate);
     
     try {
-        logStatus('Compiling...', 'info');
+        logStatus('Compiling shader...', 'info');
         clearMonacoErrors();
         
         const shaderModule = state.gpuDevice.createShaderModule({ code });
@@ -2180,24 +1597,24 @@ function restart() {
             compute: { module: shaderModule, entryPoint: 'graphics_main' },
         });
         
+        // Create audio pipeline (128×1 workgroups for 1D)
+        const newAudioPipeline = state.gpuDevice.createComputePipeline({
+            layout: pipelineLayout,
+            compute: { module: shaderModule, entryPoint: 'audio_main' },
+        });
+        
         state.graphicsPipeline = newGraphicsPipeline;
+        state.audioPipeline = newAudioPipeline;
         
-        // Create audio pipeline only if audio tab is active
-        if (hasAudio) {
-            const newAudioPipeline = state.gpuDevice.createComputePipeline({
-                layout: pipelineLayout,
-                compute: { module: shaderModule, entryPoint: 'audio_main' },
-            });
-            state.audioPipeline = newAudioPipeline;
+        // Also reload JS if playing
+        if (state.isPlaying) {
+            if (compileUserJS()) {
+                logStatus('✓ Shader and JS reloaded successfully!', 'success');
+            } else {
+                logStatus('✓ Shader compiled, but JS has errors', 'error');
+            }
         } else {
-            state.audioPipeline = null;
-        }
-        
-        // Also compile JS (but don't call init - that's restart's job)
-        if (compileUserJS()) {
-            logStatus('✓ Compiled successfully!', 'success');
-        } else {
-            logStatus('✓ Shader compiled, but JS has errors', 'error');
+            logStatus('✓ Shader compiled successfully!', 'success');
         }
         
     } catch (err) {
@@ -2211,113 +1628,21 @@ function restart() {
         display.className = type;
     }
 
-    // Render a single frame (used when paused, e.g., after restart)
-    function renderSingleFrame() {
-        if (!state.isRunning || !state.gpuDevice) return;
-        
-        const device = state.gpuDevice;
-        const ctx = state.audioContext;
-        
-        // Use t=0 for uniforms
-        const uniformData = new ArrayBuffer(256);
-        const uniformF32 = new Float32Array(uniformData);
-        const uniformI32 = new Int32Array(uniformData);
-        
-        uniformF32[UNIFORM_STRUCT.time] = 0;
-        uniformF32[UNIFORM_STRUCT.audioCurrentTime] = ctx.currentTime;
-        uniformF32[UNIFORM_STRUCT.audioPlayTime] = state.nextAudioTime;
-        uniformF32[UNIFORM_STRUCT.audioFractTime] = 0;
-        uniformI32[UNIFORM_STRUCT.audioFrame] = 0;
-        
-        // Call enterframe at t=0 to set uniforms
-        if (state.userEnterframe) {
-            try {
-                const api = {
-                    time: 0,
-                    deltaTime: 0,
-                    mouse: { x: state.mouseX, y: state.mouseY },
-                    sampleRate: DERIVED.sampleRate,
-                    samplesPerBlock: DERIVED.samplesPerBlock,
-                    audioFrame: 0,
-                    audioBlockGenerated: false,
-                    uniforms: {
-                        setFloat: (index, value) => {
-                            if (index >= 5 && index < 20) {
-                                uniformF32[index] = value;
-                            }
-                        },
-                        setInt: (index, value) => {
-                            if (index >= 5 && index < 20) {
-                                uniformI32[index] = value;
-                            }
-                        }
-                    }
-                };
-                state.userEnterframe(state.userState, api);
-            } catch (err) {
-                // Silently fail for single frame render
-                console.warn('enterframe error during single frame render:', err);
-            }
-        }
-        
-        device.queue.writeBuffer(state.uniformBuffer, 0, uniformData);
-        
-        const textureView = state.gpuContext.getCurrentTexture().createView();
-        const bindGroup = device.createBindGroup({
-            layout: state.bindGroupLayout,
-            entries: [
-                { binding: 0, resource: { buffer: state.uniformBuffer } },
-                { binding: 1, resource: { buffer: state.computeBuffer } },
-                { binding: 2, resource: { buffer: state.audioBufferGPU } },
-                { binding: 3, resource: textureView },
-                { binding: 4, resource: { buffer: state.phaseStateBuffer } },
-            ],
-        });
-        
-        const encoder = device.createCommandEncoder();
-        const pass = encoder.beginComputePass();
-        
-        // Only render graphics (no audio)
-        pass.setPipeline(state.graphicsPipeline);
-        pass.setBindGroup(0, bindGroup);
-        pass.dispatchWorkgroups(
-            CONFIG.screenSize / 8,
-            CONFIG.screenSize / 8,
-            1
-        );
-        
-        pass.end();
-        device.queue.submit([encoder.finish()]);
-    }
-
-    // Render Loop
-    function render(rawTime) {
+    // Render Loop (unchanged)
+    function render(time) {
         if (!state.isRunning) return;
-        
-        // Only render when playing
-        if (!state.isPlaying) {
-            requestAnimationFrame(render);
-            return;
-        }
 
         const device = state.gpuDevice;
         const ctx = state.audioContext;
         
-        // Calculate elapsed time (accounting for pauses)
-        const elapsedMs = rawTime - state.startTime - state.pausedTime;
-        const elapsedSec = elapsedMs * 0.001;
-        
-        // Increment visual frame counter
-        state.visualFrame++;
-        
-        document.getElementById('frameCounter').textContent = state.visualFrame;
-        document.getElementById('timeCounter').textContent = elapsedSec.toFixed(2) + 's';
+        document.getElementById('frameCounter').textContent = state.audioFrame;
+        document.getElementById('timeCounter').textContent = (time * 0.001).toFixed(2) + 's';
 
         const uniformData = new ArrayBuffer(256);
         const uniformF32 = new Float32Array(uniformData);
         const uniformI32 = new Int32Array(uniformData);
         
-        uniformF32[UNIFORM_STRUCT.time] = elapsedSec;
+        uniformF32[UNIFORM_STRUCT.time] = time * 0.001;
         uniformF32[UNIFORM_STRUCT.audioCurrentTime] = ctx.currentTime;
         uniformF32[UNIFORM_STRUCT.audioPlayTime] = state.nextAudioTime;
         uniformF32[UNIFORM_STRUCT.audioFractTime] = state.nextAudioTime % 1;
@@ -2327,7 +1652,7 @@ function restart() {
     if (state.isPlaying && state.userEnterframe) {
         try {
             const api = {
-                time: elapsedSec,
+                time: time * 0.001,
                 deltaTime: 0.016, // Could calculate real delta
                 mouse: { x: state.mouseX, y: state.mouseY },
                 sampleRate: DERIVED.sampleRate,
@@ -2352,25 +1677,24 @@ function restart() {
             // Pause playback on runtime error
             state.isPlaying = false;
             state.audioContext.suspend();
-            updatePlayPauseButton();
             
-            // Show error with line number (only if JS tab is visible)
-            if (state.activeTabs.includes('js')) {
-                const code = state.jsEditor.getValue();
-                const codeLines = code.split('\n').length;
-                const errorInfo = parseJSError(err, codeLines);
-                
-                setJSErrors([{
-                    lineNum: errorInfo.lineNum,
-                    column: errorInfo.column,
-                    endColumn: errorInfo.endColumn,
-                    message: `Runtime error in enterframe(): ${errorInfo.message}`
-                }]);
-                
-                logStatus(`✗ JS enterframe() error (line ${errorInfo.lineNum}): ${err.message}`, 'error');
-            } else {
-                logStatus(`✗ JS runtime error: ${err.message}`, 'error');
-            }
+            const btn = document.getElementById('playPauseBtn');
+            btn.textContent = '▶';
+            btn.className = 'paused';
+            
+            // Show error with line number
+            const code = state.jsEditor.getValue();
+            const codeLines = code.split('\n').length;
+            const errorInfo = parseJSError(err, codeLines);
+            
+            setJSErrors([{
+                lineNum: errorInfo.lineNum,
+                column: errorInfo.column,
+                endColumn: errorInfo.endColumn,
+                message: `Runtime error in enterframe(): ${errorInfo.message}`
+            }]);
+            
+            logStatus(`✗ JS enterframe() error (line ${errorInfo.lineNum}): ${err.message}`, 'error');
             console.error('enterframe error:', err);
         }
     }
@@ -2391,14 +1715,13 @@ function restart() {
 
         // Check if we need to generate audio THIS frame
         const needsAudio = state.isPlaying && 
-                          state.audioPipeline &&
                           ctx.currentTime >= state.nextAudioTime - CONFIG.audioBlockDuration && 
                           !state.pendingAudio;
 
         const encoder = device.createCommandEncoder();
         const pass = encoder.beginComputePass();
         
-        // AUDIO PASS FIRST - Only when we actually need a new block and have audio pipeline!
+        // AUDIO PASS FIRST - Only when we actually need a new block!
         if (needsAudio) {
             pass.setPipeline(state.audioPipeline);
             pass.setBindGroup(0, bindGroup);
