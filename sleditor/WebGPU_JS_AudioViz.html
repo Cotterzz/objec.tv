@@ -231,7 +231,7 @@
                     <div style="font-size: 16px;">🔊</div>
                 </div>
                 <div class="sliderContainer">
-                    <input type="range" id="pixelScaleSlider" class="verticalSlider" min="0" max="2" value="0" step="1" orient="vertical">
+                    <input type="range" id="pixelScaleSlider" class="verticalSlider" min="0" max="5" value="0" step="1" orient="vertical">
                     <div id="renderModeIcon" style="font-size: 16px; cursor: pointer; user-select: none;" title="Click to cycle render modes">▦</div>
                 </div>
                 <div style="display: flex; flex-direction: column; gap: 3px; color: var(--text-secondary); font-size: 12px;">
@@ -2530,7 +2530,7 @@ return { init, enterframe };
         const pixelScaleSlider = document.getElementById('pixelScaleSlider');
         pixelScaleSlider.addEventListener('input', (e) => {
             const scaleIndex = parseInt(e.target.value);
-            const scales = [1, 2, 4];  // High, Medium, Low
+            const scales = [1, 2, 3, 4, 6, 8];  // 1x, 2x, 3x, 4x, 6x, 8x
             
             state.pixelScale = scales[scaleIndex];
             
