@@ -94,21 +94,6 @@
         button.paused:hover {
             background: #d4b547;
         }
-        .verticalSlider {
-            writing-mode: bt-lr; /* IE */
-            -webkit-appearance: slider-vertical; /* WebKit */
-            appearance: slider-vertical; /* Standard */
-            width: 8px;
-            height: 80px;
-            padding: 0;
-            margin: 0;
-        }
-        .sliderContainer {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 5px;
-        }
         #errorDisplay {
             background: #1e1e1e;
             border: 1px solid #3c3c3c;
@@ -122,31 +107,9 @@
         .error { color: #f48771; }
         .success { color: #4ec9b0; }
         .info { color: #9cdcfe; }
-        #canvasContainer {
-            position: relative;
-            width: fit-content;
-            border: 1px solid #3c3c3c;
-        }
         #canvas {
-            display: block;
+            border: 1px solid #3c3c3c;
             image-rendering: pixelated;
-        }
-        #resizeHandle {
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            width: 20px;
-            height: 20px;
-            cursor: nesw-resize;
-            background: linear-gradient(225deg, transparent 0%, transparent 50%, #0e639c 50%, #0e639c 100%);
-            opacity: 0.6;
-            transition: opacity 0.2s;
-        }
-        #resizeHandle:hover {
-            opacity: 1;
-        }
-        #canvasContainer.resizing #canvas {
-            pointer-events: none;
         }
         .hint {
             color: #858585;
@@ -192,22 +155,15 @@
             </div>
         </div>
         <div id="rightPanel">
-            <div id="canvasContainer">
-                <canvas id="canvas"></canvas>
-                <div id="resizeHandle"></div>
-            </div>
+            <canvas id="canvas"></canvas>
             <div id="controls">
                 <button id="playPauseBtn" class="playing">⏸</button>
                 <button id="restartBtn" title="Restart from beginning">⟳</button>
                 <button id="reloadBtn" title="Reload shaders">⚙</button>
-                <div class="sliderContainer">
-                    <input type="range" id="volumeSlider" class="verticalSlider" min="0" max="100" value="50" orient="vertical">
-                    <div style="font-size: 16px;">🔊</div>
-                </div>
-                <div class="sliderContainer">
-                    <input type="range" id="pixelScaleSlider" class="verticalSlider" min="0" max="2" value="0" step="1" orient="vertical">
-                    <div style="font-size: 16px;">▦</div>
-                </div>
+                <label style="color: #858585;">
+                    Volume: <input type="range" id="volumeSlider" min="0" max="100" value="50" style="width: 100px;">
+                    <span id="volumeValue">50%</span>
+                </label>
             </div>
             <div class="hint">
                 Frame: <span id="frameCounter">0</span><br>
@@ -354,7 +310,7 @@
     };
 
     const CONFIG = {
-        audioBlockDuration: 0.1,
+        audioBlockDuration: 0.05,
         channels: 2,
         volume: 0.5,
         screenSize: 512,
@@ -389,9 +345,6 @@
         audioWorkletNode: null,
         
         canvas: null,
-        canvasWidth: 512,
-        canvasHeight: 512,
-        pixelScale: 1,  // 1=high, 2=medium, 4=low resolution
         gpuContext: null,
         bindGroupLayout: null,
         graphicsPipeline: null,
@@ -401,13 +354,6 @@
         phaseStateBuffer: null,
         audioBufferGPU: null,
         audioBuffersReadback: [null, null],
-        
-        // Canvas resizing
-        isResizing: false,
-        resizeStartX: 0,
-        resizeStartY: 0,
-        resizeStartWidth: 0,
-        resizeStartHeight: 0,
         
         lastFrameTime: 0,
         visualFrame: 0,        // Visual frame counter (increments every render)
@@ -454,9 +400,7 @@ function getBoilerplate() {
 const SAMPLE_RATE = ${DERIVED.sampleRate}f;
 const SAMPLES_PER_BLOCK = ${DERIVED.samplesPerBlock};
 const COMPUTE_THREADS = ${CONFIG.computeThreads};
-const SCREEN_WIDTH = ${Math.floor(state.canvasWidth / state.pixelScale)};
-const SCREEN_HEIGHT = ${Math.floor(state.canvasHeight / state.pixelScale)};
-const SCREEN_SIZE = ${CONFIG.screenSize};  // Kept for backward compatibility
+const SCREEN_SIZE = ${CONFIG.screenSize};
 const PI = 3.1415926535897932f;
 const TAU = 6.283185307179586f;
 
@@ -489,11 +433,11 @@ function getDefaultGraphicsShader() {
 // ============================================================================
 @compute @workgroup_size(8, 8, 1)
 fn graphics_main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    if (gid.x >= u32(SCREEN_WIDTH) || gid.y >= u32(SCREEN_HEIGHT)) {
+    if (gid.x >= u32(SCREEN_SIZE) || gid.y >= u32(SCREEN_SIZE)) {
         return;
     }
     
-    let uv = vec2f(gid.xy) / vec2f(SCREEN_WIDTH, SCREEN_HEIGHT);
+    let uv = vec2f(gid.xy) / f32(SCREEN_SIZE);
     let t = uniforms.time;
     
     // Background pattern (dimmed)
@@ -716,11 +660,11 @@ const EXAMPLES = {
         graphics: `// Simple gradient - your first shader!
 @compute @workgroup_size(8, 8, 1)
 fn graphics_main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    if (gid.x >= u32(SCREEN_WIDTH) || gid.y >= u32(SCREEN_HEIGHT)) {
+    if (gid.x >= u32(SCREEN_SIZE) || gid.y >= u32(SCREEN_SIZE)) {
         return;
     }
     
-    let uv = vec2f(gid.xy) / vec2f(SCREEN_WIDTH, SCREEN_HEIGHT);
+    let uv = vec2f(gid.xy) / f32(SCREEN_SIZE);
     let color = vec3f(uv.x, uv.y, 0.5);
     
     textureStore(screenTexture, gid.xy, vec4f(color, 1.0));
@@ -736,11 +680,11 @@ fn graphics_main(@builtin(global_invocation_id) gid: vec3<u32>) {
         graphics: `// Animated pattern using time
 @compute @workgroup_size(8, 8, 1)
 fn graphics_main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    if (gid.x >= u32(SCREEN_WIDTH) || gid.y >= u32(SCREEN_HEIGHT)) {
+    if (gid.x >= u32(SCREEN_SIZE) || gid.y >= u32(SCREEN_SIZE)) {
         return;
     }
     
-    let uv = vec2f(gid.xy) / vec2f(SCREEN_WIDTH, SCREEN_HEIGHT);
+    let uv = vec2f(gid.xy) / f32(SCREEN_SIZE);
     let t = uniforms.time;
     
     // Rotating pattern
@@ -767,11 +711,11 @@ fn graphics_main(@builtin(global_invocation_id) gid: vec3<u32>) {
         graphics: `// Mouse-controlled visuals
 @compute @workgroup_size(8, 8, 1)
 fn graphics_main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    if (gid.x >= u32(SCREEN_WIDTH) || gid.y >= u32(SCREEN_HEIGHT)) {
+    if (gid.x >= u32(SCREEN_SIZE) || gid.y >= u32(SCREEN_SIZE)) {
         return;
     }
     
-    let uv = vec2f(gid.xy) / vec2f(SCREEN_WIDTH, SCREEN_HEIGHT);
+    let uv = vec2f(gid.xy) / f32(SCREEN_SIZE);
     let mouse = vec2f(uniforms.mouseX, 1.0-uniforms.mouseY);
     let t = uniforms.time;
     
@@ -815,11 +759,11 @@ function enterframe(state, api) {
         graphics: `// Visualize the frequency
 @compute @workgroup_size(8, 8, 1)
 fn graphics_main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    if (gid.x >= u32(SCREEN_WIDTH) || gid.y >= u32(SCREEN_HEIGHT)) {
+    if (gid.x >= u32(SCREEN_SIZE) || gid.y >= u32(SCREEN_SIZE)) {
         return;
     }
     
-    let uv = vec2f(gid.xy) / vec2f(SCREEN_WIDTH, SCREEN_HEIGHT);
+    let uv = vec2f(gid.xy) / f32(SCREEN_SIZE);
     let freq = uniforms.frequency;
     
     // Frequency visualization
@@ -1442,7 +1386,6 @@ alias MyArray = array<f32, 16>;`;
         
         // Create Graphics editor
         const graphicsContainer = document.getElementById('graphicsContainer');
-        graphicsContainer.innerHTML = '';  // Clear loading message
         state.graphicsEditor = monaco.editor.create(graphicsContainer, {
             ...editorOptions,
             value: EXAMPLES[state.currentExample].graphics || '',
@@ -2158,105 +2101,13 @@ return { init, enterframe };
         });
     }
 
-    function updateCanvasSize(width, height, recompile = true) {
-        state.canvasWidth = width;
-        state.canvasHeight = height;
-        
-        // Apply pixel scaling to actual render resolution
-        const renderWidth = Math.floor(width / state.pixelScale);
-        const renderHeight = Math.floor(height / state.pixelScale);
-        
-        // Update canvas resolution (actual render size)
-        state.canvas.width = renderWidth;
-        state.canvas.height = renderHeight;
-        
-        // Update canvas display size (visual size - stretches pixels)
-        state.canvas.style.width = width + 'px';
-        state.canvas.style.height = height + 'px';
-        
-        // Reconfigure GPU context with new size
-        if (state.gpuContext && state.gpuDevice) {
-            state.gpuContext.configure({
-                device: state.gpuDevice,
-                format: navigator.gpu.getPreferredCanvasFormat(),
-                usage: GPUTextureUsage.STORAGE_BINDING,
-            });
-        }
-        
-        // Recompile shader with new dimensions
-        if (recompile && state.isRunning) {
-            reloadShader(true).then(() => {  // Pass true to skip AudioWorklet reload
-                const scaleLabel = state.pixelScale === 1 ? 'High' : state.pixelScale === 2 ? 'Medium' : 'Low';
-                logStatus(`Canvas: ${width}×${height} (${scaleLabel}: ${renderWidth}×${renderHeight})`, 'success');
-            });
-        }
-    }
-    
-    function setupCanvasResize() {
-        const handle = document.getElementById('resizeHandle');
-        const container = document.getElementById('canvasContainer');
-        
-        handle.addEventListener('mousedown', (e) => {
-            e.preventDefault();
-            state.isResizing = true;
-            state.resizeStartX = e.clientX;
-            state.resizeStartY = e.clientY;
-            state.resizeStartWidth = state.canvasWidth;
-            state.resizeStartHeight = state.canvasHeight;
-            container.classList.add('resizing');
-        });
-        
-        document.addEventListener('mousemove', (e) => {
-            if (!state.isResizing) return;
-            
-            // Calculate new size (left handle means negative X increases width)
-            const deltaX = state.resizeStartX - e.clientX;  // Reversed for left side
-            const deltaY = e.clientY - state.resizeStartY;
-            
-            let newWidth = state.resizeStartWidth + deltaX;
-            let newHeight = state.resizeStartHeight + deltaY;
-            
-            // Get browser constraints
-            const maxWidth = window.innerWidth * 0.66;
-            const maxHeight = window.innerHeight * 0.75;
-            
-            // Apply constraints
-            newWidth = Math.max(256, Math.min(newWidth, maxWidth));
-            newHeight = Math.max(256, Math.min(newHeight, maxHeight));
-            
-            // Snap to 16px grid
-            newWidth = Math.round(newWidth / 16) * 16;
-            newHeight = Math.round(newHeight / 16) * 16;
-            
-            // Update display size only (stretch existing image)
-            state.canvas.style.width = newWidth + 'px';
-            state.canvas.style.height = newHeight + 'px';
-        });
-        
-        document.addEventListener('mouseup', (e) => {
-            if (!state.isResizing) return;
-            
-            state.isResizing = false;
-            container.classList.remove('resizing');
-            
-            // Get final size from style (what was stretched to)
-            const finalWidth = parseInt(state.canvas.style.width);
-            const finalHeight = parseInt(state.canvas.style.height);
-            
-            // Only recompile if size actually changed
-            if (finalWidth !== state.canvasWidth || finalHeight !== state.canvasHeight) {
-                updateCanvasSize(finalWidth, finalHeight, true);
-            }
-        });
-    }
-
     function setupUI() {
         // Canvas
         state.canvas = document.getElementById('canvas');
-        updateCanvasSize(state.canvasWidth, state.canvasHeight, false);
-        
-        // Canvas resize handle
-        setupCanvasResize();
+        state.canvas.width = CONFIG.screenSize;
+        state.canvas.height = CONFIG.screenSize;
+        state.canvas.style.width = CONFIG.screenSize + 'px';
+        state.canvas.style.height = CONFIG.screenSize + 'px';
 
         // Play/Pause button
         document.getElementById('playPauseBtn').addEventListener('click', togglePlayPause);
@@ -2272,22 +2123,12 @@ return { init, enterframe };
 
         // Volume control
         const volumeSlider = document.getElementById('volumeSlider');
+        const volumeValue = document.getElementById('volumeValue');
         volumeSlider.addEventListener('input', (e) => {
             const vol = e.target.value / 100;
             CONFIG.volume = vol;
             if (state.gainNode) state.gainNode.gain.value = vol;
-        });
-        
-        // Pixel scale control
-        const pixelScaleSlider = document.getElementById('pixelScaleSlider');
-        pixelScaleSlider.addEventListener('input', (e) => {
-            const scaleIndex = parseInt(e.target.value);
-            const scales = [1, 2, 4];  // High, Medium, Low
-            
-            state.pixelScale = scales[scaleIndex];
-            
-            // Update canvas with new pixel scale
-            updateCanvasSize(state.canvasWidth, state.canvasHeight, true);
+            volumeValue.textContent = e.target.value + '%';
         });
         
         // Track mouse position
@@ -2678,20 +2519,14 @@ function restart() {
     }
 
     // Live Shader Reload - no time reset, no init() call
-    async function reloadShader(isResizeOnly = false) {
+    async function reloadShader() {
     const hasAudioGpu = state.activeTabs.includes('audio_gpu');
     const hasAudioWorklet = state.activeTabs.includes('audio_worklet');
     const hasAudio = hasAudioGpu || hasAudioWorklet;
     
     // CRITICAL: Stop old audio before loading new audio
     // This prevents both audio modes from playing simultaneously
-    // EXCEPTION: If this is just a resize and AudioWorklet is active, keep it running
-    const isWorkletActive = state.audioMode === AUDIO_MODES.WORKLET && state.audioWorkletNode;
-    const skipAudioWorkletReload = isResizeOnly && isWorkletActive && hasAudioWorklet;
-    
-    if (!skipAudioWorkletReload) {
-        stopAudio();
-    }
+    stopAudio();
     
     // Compile graphics shader
     const boilerplate = getBoilerplate();
@@ -2735,20 +2570,14 @@ function restart() {
         // Handle audio based on active tab type
         let audioCompileSuccess = true;
         if (hasAudioWorklet) {
-            // Skip AudioWorklet reload if this is just a canvas resize
-            if (skipAudioWorkletReload) {
-                // AudioWorklet is still running from before, no need to reload
-                audioCompileSuccess = true;
+            // Load AudioWorklet - this will always reload the code
+            const workletLoaded = await loadAudioWorklet();
+            if (workletLoaded) {
+                state.audioMode = AUDIO_MODES.WORKLET;
+                state.currentAudioType = 'worklet';
             } else {
-                // Load AudioWorklet - this will always reload the code
-                const workletLoaded = await loadAudioWorklet();
-                if (workletLoaded) {
-                    state.audioMode = AUDIO_MODES.WORKLET;
-                    state.currentAudioType = 'worklet';
-                } else {
-                    // AudioWorklet failed to load - error already logged by loadAudioWorklet
-                    audioCompileSuccess = false;
-                }
+                // AudioWorklet failed to load - error already logged by loadAudioWorklet
+                audioCompileSuccess = false;
             }
         } else if (hasAudioGpu) {
             // Create GPU audio pipeline
@@ -2876,8 +2705,8 @@ function restart() {
         pass.setPipeline(state.graphicsPipeline);
         pass.setBindGroup(0, bindGroup);
         pass.dispatchWorkgroups(
-            Math.ceil(state.canvasWidth / state.pixelScale / 8),
-            Math.ceil(state.canvasHeight / state.pixelScale / 8),
+            CONFIG.screenSize / 8,
+            CONFIG.screenSize / 8,
             1
         );
         
@@ -3023,8 +2852,8 @@ function restart() {
         pass.setPipeline(state.graphicsPipeline);
         pass.setBindGroup(0, bindGroup);
         pass.dispatchWorkgroups(
-            Math.ceil(state.canvasWidth / state.pixelScale / 8),   // Scaled workgroups X
-            Math.ceil(state.canvasHeight / state.pixelScale / 8),  // Scaled workgroups Y
+            CONFIG.screenSize / 8,  // 512/8 = 64 workgroups X
+            CONFIG.screenSize / 8,  // 512/8 = 64 workgroups Y
             1
         );
         

@@ -94,21 +94,6 @@
         button.paused:hover {
             background: #d4b547;
         }
-        .verticalSlider {
-            writing-mode: bt-lr; /* IE */
-            -webkit-appearance: slider-vertical; /* WebKit */
-            appearance: slider-vertical; /* Standard */
-            width: 8px;
-            height: 80px;
-            padding: 0;
-            margin: 0;
-        }
-        .sliderContainer {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 5px;
-        }
         #errorDisplay {
             background: #1e1e1e;
             border: 1px solid #3c3c3c;
@@ -122,31 +107,9 @@
         .error { color: #f48771; }
         .success { color: #4ec9b0; }
         .info { color: #9cdcfe; }
-        #canvasContainer {
-            position: relative;
-            width: fit-content;
-            border: 1px solid #3c3c3c;
-        }
         #canvas {
-            display: block;
+            border: 1px solid #3c3c3c;
             image-rendering: pixelated;
-        }
-        #resizeHandle {
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            width: 20px;
-            height: 20px;
-            cursor: nesw-resize;
-            background: linear-gradient(225deg, transparent 0%, transparent 50%, #0e639c 50%, #0e639c 100%);
-            opacity: 0.6;
-            transition: opacity 0.2s;
-        }
-        #resizeHandle:hover {
-            opacity: 1;
-        }
-        #canvasContainer.resizing #canvas {
-            pointer-events: none;
         }
         .hint {
             color: #858585;
@@ -192,22 +155,15 @@
             </div>
         </div>
         <div id="rightPanel">
-            <div id="canvasContainer">
-                <canvas id="canvas"></canvas>
-                <div id="resizeHandle"></div>
-            </div>
+            <canvas id="canvas"></canvas>
             <div id="controls">
                 <button id="playPauseBtn" class="playing">⏸</button>
                 <button id="restartBtn" title="Restart from beginning">⟳</button>
                 <button id="reloadBtn" title="Reload shaders">⚙</button>
-                <div class="sliderContainer">
-                    <input type="range" id="volumeSlider" class="verticalSlider" min="0" max="100" value="50" orient="vertical">
-                    <div style="font-size: 16px;">🔊</div>
-                </div>
-                <div class="sliderContainer">
-                    <input type="range" id="pixelScaleSlider" class="verticalSlider" min="0" max="2" value="0" step="1" orient="vertical">
-                    <div style="font-size: 16px;">▦</div>
-                </div>
+                <label style="color: #858585;">
+                    Volume: <input type="range" id="volumeSlider" min="0" max="100" value="50" style="width: 100px;">
+                    <span id="volumeValue">50%</span>
+                </label>
             </div>
             <div class="hint">
                 Frame: <span id="frameCounter">0</span><br>
@@ -347,14 +303,8 @@
 
     // Configuration & Constants
 
-    const AUDIO_MODES = {
-        GPU: 'gpu',
-        WORKLET: 'worklet',
-        NONE: 'none'
-    };
-
     const CONFIG = {
-        audioBlockDuration: 0.1,
+        audioBlockDuration: 0.05,
         channels: 2,
         volume: 0.5,
         screenSize: 512,
@@ -385,13 +335,8 @@
         gpuDevice: null,
         audioContext: null,
         gainNode: null,
-        audioMode: AUDIO_MODES.NONE,
-        audioWorkletNode: null,
         
         canvas: null,
-        canvasWidth: 512,
-        canvasHeight: 512,
-        pixelScale: 1,  // 1=high, 2=medium, 4=low resolution
         gpuContext: null,
         bindGroupLayout: null,
         graphicsPipeline: null,
@@ -401,13 +346,6 @@
         phaseStateBuffer: null,
         audioBufferGPU: null,
         audioBuffersReadback: [null, null],
-        
-        // Canvas resizing
-        isResizing: false,
-        resizeStartX: 0,
-        resizeStartY: 0,
-        resizeStartWidth: 0,
-        resizeStartHeight: 0,
         
         lastFrameTime: 0,
         visualFrame: 0,        // Visual frame counter (increments every render)
@@ -433,7 +371,6 @@
         activeTabs: ['graphics', 'help'],  // Start with just these
         currentTab: 'graphics',
         currentExample: 'hello_world',
-        currentAudioType: null,  // 'gpu' or 'worklet' - tracks which audio tab is active
         
         userState: null,
         userInit: null,
@@ -454,9 +391,7 @@ function getBoilerplate() {
 const SAMPLE_RATE = ${DERIVED.sampleRate}f;
 const SAMPLES_PER_BLOCK = ${DERIVED.samplesPerBlock};
 const COMPUTE_THREADS = ${CONFIG.computeThreads};
-const SCREEN_WIDTH = ${Math.floor(state.canvasWidth / state.pixelScale)};
-const SCREEN_HEIGHT = ${Math.floor(state.canvasHeight / state.pixelScale)};
-const SCREEN_SIZE = ${CONFIG.screenSize};  // Kept for backward compatibility
+const SCREEN_SIZE = ${CONFIG.screenSize};
 const PI = 3.1415926535897932f;
 const TAU = 6.283185307179586f;
 
@@ -489,11 +424,11 @@ function getDefaultGraphicsShader() {
 // ============================================================================
 @compute @workgroup_size(8, 8, 1)
 fn graphics_main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    if (gid.x >= u32(SCREEN_WIDTH) || gid.y >= u32(SCREEN_HEIGHT)) {
+    if (gid.x >= u32(SCREEN_SIZE) || gid.y >= u32(SCREEN_SIZE)) {
         return;
     }
     
-    let uv = vec2f(gid.xy) / vec2f(SCREEN_WIDTH, SCREEN_HEIGHT);
+    let uv = vec2f(gid.xy) / f32(SCREEN_SIZE);
     let t = uniforms.time;
     
     // Background pattern (dimmed)
@@ -615,7 +550,7 @@ function enterframe(state, api) {
     api.uniforms.setFloat(6, api.mouse.y);
 }`;
 
-const MINIMAL_AUDIO_GPU = `// Simple sine wave (GPU)
+const MINIMAL_AUDIO = `// Simple sine wave
 @compute @workgroup_size(128, 1, 1)
 fn audio_main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let sampleIndex = i32(gid.x);
@@ -627,45 +562,6 @@ fn audio_main(@builtin(global_invocation_id) gid: vec3<u32>) {
     audioBuffer[sampleIndex] = sample;
     audioBuffer[SAMPLES_PER_BLOCK + sampleIndex] = sample;
 }`;
-
-const MINIMAL_AUDIO_WORKLET = `// Simple sine wave (AudioWorklet)
-class AudioProcessor extends AudioWorkletProcessor {
-    constructor() {
-        super();
-        this.phase = 0;
-        this.frequency = 440;
-        
-        // Listen for parameter updates from JS
-        this.port.onmessage = (e) => {
-            if (e.data.frequency !== undefined) {
-                this.frequency = e.data.frequency;
-            }
-        };
-    }
-    
-    process(inputs, outputs, parameters) {
-        const output = outputs[0];
-        
-        for (let channel = 0; channel < output.length; channel++) {
-            const outputChannel = output[channel];
-            
-            for (let i = 0; i < outputChannel.length; i++) {
-                // Generate sine wave
-                outputChannel[i] = Math.sin(this.phase) * 0.3;
-                
-                // Increment phase
-                this.phase += (this.frequency * Math.PI * 2) / sampleRate;
-                if (this.phase > Math.PI * 2) {
-                    this.phase -= Math.PI * 2;
-                }
-            }
-        }
-        
-        return true; // Keep processor alive
-    }
-}
-
-registerProcessor('user-audio', AudioProcessor);`;
 
 const DEFAULT_JS = `// This code runs alongside your WGSL shader
 // Use 'state' to persist data between frames
@@ -716,11 +612,11 @@ const EXAMPLES = {
         graphics: `// Simple gradient - your first shader!
 @compute @workgroup_size(8, 8, 1)
 fn graphics_main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    if (gid.x >= u32(SCREEN_WIDTH) || gid.y >= u32(SCREEN_HEIGHT)) {
+    if (gid.x >= u32(SCREEN_SIZE) || gid.y >= u32(SCREEN_SIZE)) {
         return;
     }
     
-    let uv = vec2f(gid.xy) / vec2f(SCREEN_WIDTH, SCREEN_HEIGHT);
+    let uv = vec2f(gid.xy) / f32(SCREEN_SIZE);
     let color = vec3f(uv.x, uv.y, 0.5);
     
     textureStore(screenTexture, gid.xy, vec4f(color, 1.0));
@@ -736,11 +632,11 @@ fn graphics_main(@builtin(global_invocation_id) gid: vec3<u32>) {
         graphics: `// Animated pattern using time
 @compute @workgroup_size(8, 8, 1)
 fn graphics_main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    if (gid.x >= u32(SCREEN_WIDTH) || gid.y >= u32(SCREEN_HEIGHT)) {
+    if (gid.x >= u32(SCREEN_SIZE) || gid.y >= u32(SCREEN_SIZE)) {
         return;
     }
     
-    let uv = vec2f(gid.xy) / vec2f(SCREEN_WIDTH, SCREEN_HEIGHT);
+    let uv = vec2f(gid.xy) / f32(SCREEN_SIZE);
     let t = uniforms.time;
     
     // Rotating pattern
@@ -767,11 +663,11 @@ fn graphics_main(@builtin(global_invocation_id) gid: vec3<u32>) {
         graphics: `// Mouse-controlled visuals
 @compute @workgroup_size(8, 8, 1)
 fn graphics_main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    if (gid.x >= u32(SCREEN_WIDTH) || gid.y >= u32(SCREEN_HEIGHT)) {
+    if (gid.x >= u32(SCREEN_SIZE) || gid.y >= u32(SCREEN_SIZE)) {
         return;
     }
     
-    let uv = vec2f(gid.xy) / vec2f(SCREEN_WIDTH, SCREEN_HEIGHT);
+    let uv = vec2f(gid.xy) / f32(SCREEN_SIZE);
     let mouse = vec2f(uniforms.mouseX, 1.0-uniforms.mouseY);
     let t = uniforms.time;
     
@@ -809,17 +705,17 @@ function enterframe(state, api) {
     },
     
     simple_tone: {
-        name: "Simple Tone (AudioWorklet)",
-        description: "Basic audio synthesis with AudioWorklet",
+        name: "Simple Tone",
+        description: "Basic audio synthesis",
         tabs: ["graphics", "audio", "js"],
         graphics: `// Visualize the frequency
 @compute @workgroup_size(8, 8, 1)
 fn graphics_main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    if (gid.x >= u32(SCREEN_WIDTH) || gid.y >= u32(SCREEN_HEIGHT)) {
+    if (gid.x >= u32(SCREEN_SIZE) || gid.y >= u32(SCREEN_SIZE)) {
         return;
     }
     
-    let uv = vec2f(gid.xy) / vec2f(SCREEN_WIDTH, SCREEN_HEIGHT);
+    let uv = vec2f(gid.xy) / f32(SCREEN_SIZE);
     let freq = uniforms.frequency;
     
     // Frequency visualization
@@ -832,51 +728,41 @@ fn graphics_main(@builtin(global_invocation_id) gid: vec3<u32>) {
     // Frequency indicator line
     color += vec3f(0.0, 1.0, 0.5) * freqLine;
     
-    // Mouse position indicator
-    let mouseDist = length(uv - vec2f(uniforms.mouseX, uniforms.mouseY));
-    let mouseCircle = smoothstep(0.05, 0.04, mouseDist);
-    color += vec3f(1.0, 0.5, 0.0) * mouseCircle;
-    
     textureStore(screenTexture, gid.xy, vec4f(color, 1.0));
 }`,
-        audio: `// AudioWorklet sine wave synthesizer
-class AudioProcessor extends AudioWorkletProcessor {
-    constructor() {
-        super();
-        this.phase = 0;
-        this.frequency = 440;
-        
-        // Listen for frequency updates from JS
-        this.port.onmessage = (e) => {
-            if (e.data.frequency !== undefined) {
-                this.frequency = e.data.frequency;
-            }
-        };
+        audio: `// Simple sine wave tone
+@compute @workgroup_size(128, 1, 1)
+fn audio_main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let sampleIndex = i32(gid.x);
+    
+    if (sampleIndex >= SAMPLES_PER_BLOCK) {
+        return;
     }
     
-    process(inputs, outputs, parameters) {
-        const output = outputs[0];
-        
-        for (let channel = 0; channel < output.length; channel++) {
-            const outputChannel = output[channel];
-            
-            for (let i = 0; i < outputChannel.length; i++) {
-                // Generate sine wave
-                outputChannel[i] = Math.sin(this.phase) * 0.3;
-                
-                // Increment phase
-                this.phase += (this.frequency * Math.PI * 2) / sampleRate;
-                if (this.phase > Math.PI * 2) {
-                    this.phase -= Math.PI * 2;
-                }
-            }
+    // GPU-side phase accumulation
+    let basePhase = phaseState[0];
+    let phaseIncrement = uniforms.frequency * TAU / SAMPLE_RATE;
+    var phase = basePhase + f32(sampleIndex) * phaseIncrement;
+    
+    // Generate sine wave
+    let sample = sin(phase) * 0.3;
+    
+    // Write stereo
+    audioBuffer[sampleIndex] = sample;
+    audioBuffer[SAMPLES_PER_BLOCK + sampleIndex] = sample;
+    
+    // Update phase state (last thread only)
+    if (sampleIndex == SAMPLES_PER_BLOCK - 1) {
+        var finalPhase = basePhase + f32(SAMPLES_PER_BLOCK) * phaseIncrement;
+        while (finalPhase >= TAU) {
+            finalPhase -= TAU;
         }
-        
-        return true; // Keep processor alive
+        while (finalPhase < 0.0) {
+            finalPhase += TAU;
+        }
+        phaseState[0] = finalPhase;
     }
-}
-
-registerProcessor('user-audio', AudioProcessor);`,
+}`,
         js: `function init() {
     return {
         mouseX: 0.5,
@@ -892,10 +778,6 @@ function enterframe(state, api) {
     // Mouse X controls frequency (220-880 Hz)
     state.frequency = 220 + state.mouseX * 660;
     
-    // Send frequency to AudioWorklet
-    api.audio.send({ frequency: state.frequency });
-    
-    // Also set shader uniforms for visualization
     api.uniforms.setFloat(5, state.mouseX);
     api.uniforms.setFloat(6, state.mouseY);
     api.uniforms.setFloat(7, state.frequency);
@@ -1442,7 +1324,6 @@ alias MyArray = array<f32, 16>;`;
         
         // Create Graphics editor
         const graphicsContainer = document.getElementById('graphicsContainer');
-        graphicsContainer.innerHTML = '';  // Clear loading message
         state.graphicsEditor = monaco.editor.create(graphicsContainer, {
             ...editorOptions,
             value: EXAMPLES[state.currentExample].graphics || '',
@@ -1451,21 +1332,10 @@ alias MyArray = array<f32, 16>;`;
         
         // Create Audio editor
         const audioContainer = document.getElementById('audioContainer');
-        // Determine initial audio type from example tabs
-        const exampleTabs = EXAMPLES[state.currentExample].tabs || [];
-        const hasAudioTab = exampleTabs.includes('audio');
-        let initialAudioCode = '';
-        let initialAudioLanguage = 'wgsl';
-        
-        if (hasAudioTab && EXAMPLES[state.currentExample].audio) {
-            initialAudioCode = EXAMPLES[state.currentExample].audio;
-            initialAudioLanguage = initialAudioCode.includes('AudioWorkletProcessor') ? 'javascript' : 'wgsl';
-        }
-        
         state.audioEditor = monaco.editor.create(audioContainer, {
             ...editorOptions,
-            value: initialAudioCode,
-            language: initialAudioLanguage,
+            value: EXAMPLES[state.currentExample].audio || MINIMAL_AUDIO,
+            language: 'wgsl',
         });
         
         // Create JavaScript editor 
@@ -1501,68 +1371,24 @@ alias MyArray = array<f32, 16>;`;
             
             // Set up error markers when shader compilation fails
             window.setMonacoErrors = function(errors) {
-                // Calculate line offsets for each section
-                // Code structure: boilerplate + '\n' + graphics + '\n' + audio
-                const boilerplateLines = state.boilerplateEditor.getValue().split('\n').length;
-                const graphicsLines = state.graphicsEditor.getValue().split('\n').length;
-                
-                // +1 for each '\n' separator
-                const graphicsStartLine = boilerplateLines + 1;
-                const audioStartLine = boilerplateLines + 1 + graphicsLines + 1;
-                
-                // Separate errors by which editor they belong to
-                const boilerplateErrors = [];
-                const graphicsErrors = [];
-                const audioErrors = [];
-                
-                errors.forEach(err => {
-                    const lineNum = err.lineNum || 1;
-                    
-                    if (lineNum < graphicsStartLine) {
-                        // Error is in boilerplate
-                        boilerplateErrors.push({
-                            severity: monaco.MarkerSeverity.Error,
-                            startLineNumber: lineNum,
-                            startColumn: err.linePos || 1,
-                            endLineNumber: lineNum,
-                            endColumn: 1000,
-                            message: err.message
-                        });
-                    } else if (lineNum < audioStartLine) {
-                        // Error is in graphics - adjust line number
-                        graphicsErrors.push({
-                            severity: monaco.MarkerSeverity.Error,
-                            startLineNumber: lineNum - graphicsStartLine + 1,
-                            startColumn: err.linePos || 1,
-                            endLineNumber: lineNum - graphicsStartLine + 1,
-                            endColumn: 1000,
-                            message: err.message
-                        });
-                    } else {
-                        // Error is in audio - adjust line number
-                        audioErrors.push({
-                            severity: monaco.MarkerSeverity.Error,
-                            startLineNumber: lineNum - audioStartLine + 2,
-                            startColumn: err.linePos || 1,
-                            endLineNumber: lineNum - audioStartLine + 2,
-                            endColumn: 1000,
-                            message: err.message
-                        });
-                    }
-                });
-                
-                // Set markers in the appropriate editors
-                monaco.editor.setModelMarkers(state.boilerplateEditor.getModel(), 'wgsl', boilerplateErrors);
-                monaco.editor.setModelMarkers(state.graphicsEditor.getModel(), 'wgsl', graphicsErrors);
-                monaco.editor.setModelMarkers(state.audioEditor.getModel(), 'wgsl', audioErrors);
+                const markers = errors.map(err => ({
+                    severity: monaco.MarkerSeverity.Error,
+                    startLineNumber: err.lineNum || 1,
+                    startColumn: err.linePos || 1,
+                    endLineNumber: err.lineNum || 1,
+                    endColumn: 1000,
+                    message: err.message
+                }));
+                // Try to place marker in the relevant editor based on line number
+                // For now, clear all and show in graphics (could be smarter later)
+                monaco.editor.setModelMarkers(state.graphicsEditor.getModel(), 'wgsl', []);
+                monaco.editor.setModelMarkers(state.audioEditor.getModel(), 'wgsl', []);
+                monaco.editor.setModelMarkers(state.graphicsEditor.getModel(), 'wgsl', markers);
             };
             
             window.clearMonacoErrors = function() {
-                monaco.editor.setModelMarkers(state.boilerplateEditor.getModel(), 'wgsl', []);
                 monaco.editor.setModelMarkers(state.graphicsEditor.getModel(), 'wgsl', []);
                 monaco.editor.setModelMarkers(state.audioEditor.getModel(), 'wgsl', []);
-                // Also clear JavaScript errors in audio editor (for AudioWorklet)
-                monaco.editor.setModelMarkers(state.audioEditor.getModel(), 'javascript', []);
             };
             
             // JS error markers
@@ -1593,8 +1419,7 @@ function getTabIcon(tabName) {
     const icons = {
         boilerplate: '📄',
         graphics: '🎨',
-        audio_gpu: '🔊',
-        audio_worklet: '🎵',
+        audio: '🔊',
         js: '⚡',
         help: '❓'
     };
@@ -1605,8 +1430,7 @@ function getTabLabel(tabName) {
     const labels = {
         boilerplate: 'Boilerplate',
         graphics: 'Graphics',
-        audio_gpu: 'Audio (WGSL)',
-        audio_worklet: 'Audio (Worklet)',
+        audio: 'Audio',
         js: 'JavaScript',
         help: 'Help'
     };
@@ -1659,8 +1483,7 @@ function switchTab(tabName) {
     const containers = {
         boilerplate: document.getElementById('boilerplateContainer'),
         graphics: document.getElementById('graphicsContainer'),
-        audio_gpu: document.getElementById('audioContainer'),
-        audio_worklet: document.getElementById('audioContainer'),  // Both audio tabs use same container
+        audio: document.getElementById('audioContainer'),
         js: document.getElementById('jsEditorContainer'),
         help: document.getElementById('helpContainer')
     };
@@ -1668,26 +1491,17 @@ function switchTab(tabName) {
     const editors = {
         boilerplate: state.boilerplateEditor,
         graphics: state.graphicsEditor,
-        audio_gpu: state.audioEditor,
-        audio_worklet: state.audioEditor,  // Both audio tabs use same editor
+        audio: state.audioEditor,
         js: state.jsEditor,
         help: state.helpEditor
     };
     
-    // Hide all containers (use unique set to avoid hiding/showing same container twice)
-    const uniqueContainers = [...new Set(Object.values(containers))];
-    uniqueContainers.forEach(c => c.style.display = 'none');
+    // Hide all containers
+    Object.values(containers).forEach(c => c.style.display = 'none');
     
     // Show selected container
     if (containers[tabName]) {
         containers[tabName].style.display = 'block';
-    }
-    
-    // Update editor language mode for audio tabs
-    if (tabName === 'audio_gpu' && state.audioEditor) {
-        monaco.editor.setModelLanguage(state.audioEditor.getModel(), 'wgsl');
-    } else if (tabName === 'audio_worklet' && state.audioEditor) {
-        monaco.editor.setModelLanguage(state.audioEditor.getModel(), 'javascript');
     }
     
     // Force layout update
@@ -1705,26 +1519,6 @@ function addTab(tabName) {
         return;
     }
     
-    // Audio tabs are mutually exclusive - remove the other if adding one
-    if (tabName === 'audio_gpu' || tabName === 'audio_worklet') {
-        const otherAudioTab = tabName === 'audio_gpu' ? 'audio_worklet' : 'audio_gpu';
-        const otherIndex = state.activeTabs.indexOf(otherAudioTab);
-        if (otherIndex !== -1) {
-            state.activeTabs.splice(otherIndex, 1);
-        }
-        
-        // Set the appropriate content based on which audio tab
-        if (state.audioEditor) {
-            if (tabName === 'audio_gpu') {
-                state.audioEditor.setValue(MINIMAL_AUDIO_GPU);
-                state.currentAudioType = 'gpu';
-            } else {
-                state.audioEditor.setValue(MINIMAL_AUDIO_WORKLET);
-                state.currentAudioType = 'worklet';
-            }
-        }
-    }
-    
     state.activeTabs.push(tabName);
     
     // If adding a tab that the current example doesn't have, populate with minimal starter code
@@ -1732,13 +1526,15 @@ function addTab(tabName) {
     
     if (tabName === 'js' && !currentExample.js && state.jsEditor) {
         state.jsEditor.setValue(MINIMAL_JS);
+    } else if (tabName === 'audio' && !currentExample.audio && state.audioEditor) {
+        state.audioEditor.setValue(MINIMAL_AUDIO);
     }
     
     renderTabs();
     switchTab(tabName);
     
     // If we just added audio or js, reload the shader/script
-    if ((tabName === 'audio_gpu' || tabName === 'audio_worklet' || tabName === 'js') && state.isRunning) {
+    if ((tabName === 'audio' || tabName === 'js') && state.isRunning) {
         reloadShader();
     }
 }
@@ -1753,14 +1549,6 @@ function removeTab(tabName) {
     if (index === -1) return;
     
     state.activeTabs.splice(index, 1);
-    
-    // If removing an audio tab, clear audio type and stop audio
-    if (tabName === 'audio_gpu' || tabName === 'audio_worklet') {
-        state.currentAudioType = null;
-        if (state.isRunning) {
-            stopAudio();
-        }
-    }
     
     // If we removed the current tab, switch to another
     if (state.currentTab === tabName) {
@@ -1792,35 +1580,24 @@ function showAddPassMenu() {
     // Build menu options - all available tabs except graphics (always present)
     const availableTabs = [
         { name: 'boilerplate', label: '📄 Boilerplate' },
-        { name: 'audio_gpu', label: '🔊 Audio (WGSL)' },
-        { name: 'audio_worklet', label: '🎵 Audio (Worklet)' },
+        { name: 'audio', label: '🔊 Audio' },
         { name: 'js', label: '⚡ JavaScript' },
         { name: 'help', label: '❓ Help' }
     ];
     
     menu.innerHTML = '';
-    
-    // Check if any audio tab is active for mutual exclusion
-    const hasAudioGpu = state.activeTabs.includes('audio_gpu');
-    const hasAudioWorklet = state.activeTabs.includes('audio_worklet');
-    
     availableTabs.forEach(tab => {
         const isActive = state.activeTabs.includes(tab.name);
-        
-        // Grey out the other audio tab if one is active
-        const isDisabled = (tab.name === 'audio_gpu' && hasAudioWorklet) || 
-                          (tab.name === 'audio_worklet' && hasAudioGpu);
-        
         const option = document.createElement('div');
         option.textContent = tab.label + (isActive ? ' ✓' : '');
         option.style.cssText = `
             padding: 6px 12px;
-            cursor: ${(isActive || isDisabled) ? 'default' : 'pointer'};
-            color: ${(isActive || isDisabled) ? '#666' : '#d4d4d4'};
-            pointer-events: ${(isActive || isDisabled) ? 'none' : 'auto'};
+            cursor: ${isActive ? 'default' : 'pointer'};
+            color: ${isActive ? '#666' : '#d4d4d4'};
+            pointer-events: ${isActive ? 'none' : 'auto'};
         `;
         option.onmouseenter = () => {
-            if (!isActive && !isDisabled) {
+            if (!isActive) {
                 option.style.background = '#1e1e1e';
             }
         };
@@ -1878,39 +1655,15 @@ function loadExample(exampleId) {
     
     state.currentExample = exampleId;
     
-    // Convert old 'audio' tab references to new audio_gpu or audio_worklet
-    const updatedTabs = example.tabs.map(tab => {
-        if (tab === 'audio') {
-            // Detect which type of audio based on content
-            if (example.audio) {
-                const isWorklet = example.audio.includes('AudioWorkletProcessor') || 
-                                 example.audio.includes('registerProcessor');
-                return isWorklet ? 'audio_worklet' : 'audio_gpu';
-            }
-            // Default to worklet if no audio code provided
-            return 'audio_worklet';
-        }
-        return tab;
-    });
-    
     // Update active tabs to match example
-    state.activeTabs = [...updatedTabs];
+    state.activeTabs = [...example.tabs];
     
-    // Determine current audio type from tabs
-    if (state.activeTabs.includes('audio_gpu')) {
-        state.currentAudioType = 'gpu';
-    } else if (state.activeTabs.includes('audio_worklet')) {
-        state.currentAudioType = 'worklet';
-    } else {
-        state.currentAudioType = null;
-    }
-    
-    // Load code into editors
+    // Load code into editors (or set to minimal if example doesn't have it)
     if (state.graphicsEditor) {
         state.graphicsEditor.setValue(example.graphics || '');
     }
-    if (state.audioEditor && example.audio) {
-        state.audioEditor.setValue(example.audio);
+    if (state.audioEditor) {
+        state.audioEditor.setValue(example.audio || MINIMAL_AUDIO);
     }
     if (state.jsEditor) {
         state.jsEditor.setValue(example.js || MINIMAL_JS);
@@ -1928,22 +1681,15 @@ function loadExample(exampleId) {
     
     // Reload shader with new code, then restart and auto-play
     if (state.isRunning) {
-        reloadShader().then((success) => {
-            // Restart regardless (to reset state)
+        reloadShader().then(() => {
+            // Restart from beginning and ensure playing
             restart();
             if (!state.isPlaying) {
                 state.isPlaying = true;
                 state.audioContext.resume();
                 updatePlayPauseButton();
             }
-            // Only show success message if compilation succeeded
-            if (success) {
-                logStatus(`Loaded example: ${example.name}`, 'success');
-            }
-            // If failed, error message is already shown by reloadShader()
-        }).catch((err) => {
-            // Error already logged in reloadShader, just don't show success message
-            console.error('Failed to load example (caught):', err);
+            logStatus(`Loaded example: ${example.name}`, 'success');
         });
     } else {
         logStatus(`Loaded example: ${example.name}`, 'success');
@@ -1960,9 +1706,8 @@ function parseJSError(err, codeLines) {
     const stackMatch = err.stack?.match(/<anonymous>:(\d+):(\d+)/);
     if (stackMatch) {
         // Line numbers from Function() wrapper need adjustment
-        // Testing shows we need to subtract 3 to get the correct line
-        const rawLineNum = parseInt(stackMatch[1]);
-        lineNum = Math.max(1, rawLineNum - 3);
+        // Testing showed we need to subtract 3 to get correct line
+        lineNum = Math.max(1, parseInt(stackMatch[1]) - 3);
         column = parseInt(stackMatch[2]) || 1;
         
         // Try to determine end column by looking at the error type
@@ -2025,12 +1770,8 @@ return { init, enterframe };
         state.userInit = userFunctions.init;
         state.userEnterframe = userFunctions.enterframe;
         
-        // Only show success message if there's no error already showing
         if (!useDefault) {
-            const statusDisplay = document.getElementById('errorDisplay');
-            if (!statusDisplay.classList.contains('error')) {
-                logStatus('✓ JavaScript compiled successfully', 'success');
-            }
+            logStatus('✓ JavaScript compiled successfully', 'success');
         }
         return true;
     } catch (err) {
@@ -2049,15 +1790,7 @@ return { init, enterframe };
             message: errorInfo.message
         }]);
         
-        // Show error with line number if available
-        if (errorInfo.lineNum > 1) {
-            // We have a valid line number (runtime error)
-            logStatus(`✗ JS Error (line ${errorInfo.lineNum}): ${errorInfo.message}`, 'error');
-        } else {
-            // No line number (syntax error - browser limitation)
-            // Monaco's built-in linter should show these in real-time
-            logStatus(`✗ JS Syntax Error: ${errorInfo.message} (check editor for red underlines)`, 'error');
-        }
+        logStatus(`✗ JS Error (line ${errorInfo.lineNum}): ${errorInfo.message}`, 'error');
         return false;
     }
 }
@@ -2158,105 +1891,13 @@ return { init, enterframe };
         });
     }
 
-    function updateCanvasSize(width, height, recompile = true) {
-        state.canvasWidth = width;
-        state.canvasHeight = height;
-        
-        // Apply pixel scaling to actual render resolution
-        const renderWidth = Math.floor(width / state.pixelScale);
-        const renderHeight = Math.floor(height / state.pixelScale);
-        
-        // Update canvas resolution (actual render size)
-        state.canvas.width = renderWidth;
-        state.canvas.height = renderHeight;
-        
-        // Update canvas display size (visual size - stretches pixels)
-        state.canvas.style.width = width + 'px';
-        state.canvas.style.height = height + 'px';
-        
-        // Reconfigure GPU context with new size
-        if (state.gpuContext && state.gpuDevice) {
-            state.gpuContext.configure({
-                device: state.gpuDevice,
-                format: navigator.gpu.getPreferredCanvasFormat(),
-                usage: GPUTextureUsage.STORAGE_BINDING,
-            });
-        }
-        
-        // Recompile shader with new dimensions
-        if (recompile && state.isRunning) {
-            reloadShader(true).then(() => {  // Pass true to skip AudioWorklet reload
-                const scaleLabel = state.pixelScale === 1 ? 'High' : state.pixelScale === 2 ? 'Medium' : 'Low';
-                logStatus(`Canvas: ${width}×${height} (${scaleLabel}: ${renderWidth}×${renderHeight})`, 'success');
-            });
-        }
-    }
-    
-    function setupCanvasResize() {
-        const handle = document.getElementById('resizeHandle');
-        const container = document.getElementById('canvasContainer');
-        
-        handle.addEventListener('mousedown', (e) => {
-            e.preventDefault();
-            state.isResizing = true;
-            state.resizeStartX = e.clientX;
-            state.resizeStartY = e.clientY;
-            state.resizeStartWidth = state.canvasWidth;
-            state.resizeStartHeight = state.canvasHeight;
-            container.classList.add('resizing');
-        });
-        
-        document.addEventListener('mousemove', (e) => {
-            if (!state.isResizing) return;
-            
-            // Calculate new size (left handle means negative X increases width)
-            const deltaX = state.resizeStartX - e.clientX;  // Reversed for left side
-            const deltaY = e.clientY - state.resizeStartY;
-            
-            let newWidth = state.resizeStartWidth + deltaX;
-            let newHeight = state.resizeStartHeight + deltaY;
-            
-            // Get browser constraints
-            const maxWidth = window.innerWidth * 0.66;
-            const maxHeight = window.innerHeight * 0.75;
-            
-            // Apply constraints
-            newWidth = Math.max(256, Math.min(newWidth, maxWidth));
-            newHeight = Math.max(256, Math.min(newHeight, maxHeight));
-            
-            // Snap to 16px grid
-            newWidth = Math.round(newWidth / 16) * 16;
-            newHeight = Math.round(newHeight / 16) * 16;
-            
-            // Update display size only (stretch existing image)
-            state.canvas.style.width = newWidth + 'px';
-            state.canvas.style.height = newHeight + 'px';
-        });
-        
-        document.addEventListener('mouseup', (e) => {
-            if (!state.isResizing) return;
-            
-            state.isResizing = false;
-            container.classList.remove('resizing');
-            
-            // Get final size from style (what was stretched to)
-            const finalWidth = parseInt(state.canvas.style.width);
-            const finalHeight = parseInt(state.canvas.style.height);
-            
-            // Only recompile if size actually changed
-            if (finalWidth !== state.canvasWidth || finalHeight !== state.canvasHeight) {
-                updateCanvasSize(finalWidth, finalHeight, true);
-            }
-        });
-    }
-
     function setupUI() {
         // Canvas
         state.canvas = document.getElementById('canvas');
-        updateCanvasSize(state.canvasWidth, state.canvasHeight, false);
-        
-        // Canvas resize handle
-        setupCanvasResize();
+        state.canvas.width = CONFIG.screenSize;
+        state.canvas.height = CONFIG.screenSize;
+        state.canvas.style.width = CONFIG.screenSize + 'px';
+        state.canvas.style.height = CONFIG.screenSize + 'px';
 
         // Play/Pause button
         document.getElementById('playPauseBtn').addEventListener('click', togglePlayPause);
@@ -2272,22 +1913,12 @@ return { init, enterframe };
 
         // Volume control
         const volumeSlider = document.getElementById('volumeSlider');
+        const volumeValue = document.getElementById('volumeValue');
         volumeSlider.addEventListener('input', (e) => {
             const vol = e.target.value / 100;
             CONFIG.volume = vol;
             if (state.gainNode) state.gainNode.gain.value = vol;
-        });
-        
-        // Pixel scale control
-        const pixelScaleSlider = document.getElementById('pixelScaleSlider');
-        pixelScaleSlider.addEventListener('input', (e) => {
-            const scaleIndex = parseInt(e.target.value);
-            const scales = [1, 2, 4];  // High, Medium, Low
-            
-            state.pixelScale = scales[scaleIndex];
-            
-            // Update canvas with new pixel scale
-            updateCanvasSize(state.canvasWidth, state.canvasHeight, true);
+            volumeValue.textContent = e.target.value + '%';
         });
         
         // Track mouse position
@@ -2390,11 +2021,7 @@ function restart() {
         try {
             state.userState = state.userInit ? state.userInit() : {};
             clearJSErrors();
-            // Only show "Restarted" message if there's no error already showing
-            const statusDisplay = document.getElementById('errorDisplay');
-            if (!statusDisplay.classList.contains('error')) {
-                logStatus('Restarted from beginning', 'success');
-            }
+            logStatus('Restarted from beginning', 'success');
         } catch (err) {
             const code = state.jsEditor?.getValue() || INVISIBLE_DEFAULT_JS;
             const codeLines = code.split('\n').length;
@@ -2514,202 +2141,24 @@ function restart() {
         state.audioContext.suspend();
     }
 
-    // Parse AudioWorklet errors to extract line numbers
-    function parseAudioWorkletError(err, codeLines) {
-        let lineNum = null;
-        let column = 1;
-        let endColumn = 1000;
-        
-        // Try multiple patterns for line number extraction
-        // Pattern 1: "blob:http://localhost:5500/xxx:5:10" format (most common)
-        let match = err.stack?.match(/blob:[^:]+:(\d+):(\d+)/);
-        if (match) {
-            lineNum = parseInt(match[1]);
-            column = parseInt(match[2]);
-            endColumn = column + 10;
-        }
-        
-        // Pattern 2: Simple ":line:col" format
-        if (!match) {
-            match = err.stack?.match(/:(\d+):(\d+)/);
-            if (match) {
-                lineNum = parseInt(match[1]);
-                column = parseInt(match[2]);
-                endColumn = column + 10;
-            }
-        }
-        
-        // Pattern 3: "line X" in the message
-        if (!lineNum) {
-            match = err.message?.match(/line (\d+)/i);
-            if (match) {
-                lineNum = parseInt(match[1]);
-            }
-        }
-        
-        // If we still don't have a line number, return null to signal no error marker
-        if (!lineNum || lineNum < 1) {
-            console.warn('Could not parse line number from AudioWorklet error');
-            return null;
-        }
-        
-        // Clamp to valid range
-        lineNum = Math.min(Math.max(1, lineNum), codeLines);
-        
-        return { lineNum, column, endColumn, message: err.message };
-    }
-    
-    // Set AudioWorklet error markers in Monaco
-    function setAudioWorkletErrors(errors) {
-        const markers = errors.map(err => ({
-            severity: monaco.MarkerSeverity.Error,
-            startLineNumber: err.lineNum || 1,
-            startColumn: err.column || 1,
-            endLineNumber: err.lineNum || 1,
-            endColumn: err.endColumn || 1000,
-            message: err.message
-        }));
-        monaco.editor.setModelMarkers(state.audioEditor.getModel(), 'javascript', markers);
-    }
-    
-    function clearAudioWorkletErrors() {
-        monaco.editor.setModelMarkers(state.audioEditor.getModel(), 'javascript', []);
-    }
-
-    // AudioWorklet Management
-    async function loadAudioWorklet() {
-        if (!state.audioContext) return false;
-        
-        const audioCode = state.audioEditor.getValue();
-        const codeLines = audioCode.split('\n').length;
-        
-        try {
-            clearAudioWorkletErrors();
-            
-            // Note: We can't pre-validate AudioWorklet code because AudioWorkletProcessor
-            // and other AudioWorklet APIs only exist in the AudioWorklet scope.
-            // We'll catch errors during the actual addModule() call instead.
-            
-            // Disconnect and remove old worklet if exists
-            if (state.audioWorkletNode) {
-                state.audioWorkletNode.disconnect();
-                state.audioWorkletNode = null;
-            }
-            
-            // Generate unique processor name for each reload to avoid registration conflicts
-            const processorName = 'user-audio-' + Date.now();
-            
-            // Replace the registerProcessor call in user's code with our unique name
-            const modifiedCode = audioCode.replace(
-                /registerProcessor\s*\(\s*['"]user-audio['"]\s*,/,
-                `registerProcessor('${processorName}',`
-            );
-            
-            // Create blob URL with the modified audio code
-            const blob = new Blob([modifiedCode], { type: 'application/javascript' });
-            const url = URL.createObjectURL(blob);
-            
-            // Load the module
-            await state.audioContext.audioWorklet.addModule(url);
-            URL.revokeObjectURL(url);
-            
-            // Create the worklet node with our unique processor name
-            state.audioWorkletNode = new AudioWorkletNode(state.audioContext, processorName);
-            state.audioWorkletNode.connect(state.gainNode);
-            
-            // Listen for errors from the worklet
-            state.audioWorkletNode.port.onmessageerror = (event) => {
-                console.error('AudioWorklet message error:', event);
-                logStatus(`✗ AudioWorklet runtime error`, 'error');
-            };
-            
-            state.audioMode = AUDIO_MODES.WORKLET;
-            return true;
-        } catch (err) {
-            console.error('AudioWorklet loading error:', err);
-            
-            // Try to parse line numbers from the error
-            let lineNum = null;
-            let column = 1;
-            let endColumn = 1000;
-            
-            // Try to parse from stack trace
-            // AudioWorklet errors from addModule often have format like ":30:10"
-            const stackMatch = err.stack?.match(/:(\d+):(\d+)/);
-            if (stackMatch) {
-                lineNum = parseInt(stackMatch[1]);
-                column = parseInt(stackMatch[2]);
-                endColumn = column + 10;
-            }
-            
-            if (lineNum && lineNum > 0 && lineNum <= codeLines) {
-                // We got a valid line number - show marker
-                setAudioWorkletErrors([{
-                    lineNum,
-                    column,
-                    endColumn,
-                    message: err.message
-                }]);
-                logStatus(`✗ AudioWorklet error (line ${lineNum}): ${err.message}`, 'error');
-            } else {
-                // No line number available (AudioWorklet limitation)
-                // Monaco's built-in JavaScript linter should still show errors in the editor
-                console.warn('Could not parse line number from AudioWorklet error (browser limitation)');
-                logStatus(`✗ AudioWorklet error: ${err.message} (check editor for red underlines)`, 'error');
-            }
-            
-            state.audioMode = AUDIO_MODES.NONE;
-            return false;
-        }
-    }
-    
-    function stopAudio() {
-        // Stop GPU audio
-        state.audioPipeline = null;
-        state.pendingAudio = false;
-        
-        // Stop AudioWorklet
-        if (state.audioWorkletNode) {
-            state.audioWorkletNode.disconnect();
-            state.audioWorkletNode = null;
-        }
-        
-        state.audioMode = AUDIO_MODES.NONE;
-    }
-
     // Live Shader Reload - no time reset, no init() call
-    async function reloadShader(isResizeOnly = false) {
-    const hasAudioGpu = state.activeTabs.includes('audio_gpu');
-    const hasAudioWorklet = state.activeTabs.includes('audio_worklet');
-    const hasAudio = hasAudioGpu || hasAudioWorklet;
-    
-    // CRITICAL: Stop old audio before loading new audio
-    // This prevents both audio modes from playing simultaneously
-    // EXCEPTION: If this is just a resize and AudioWorklet is active, keep it running
-    const isWorkletActive = state.audioMode === AUDIO_MODES.WORKLET && state.audioWorkletNode;
-    const skipAudioWorkletReload = isResizeOnly && isWorkletActive && hasAudioWorklet;
-    
-    if (!skipAudioWorkletReload) {
-        stopAudio();
-    }
-    
-    // Compile graphics shader
-    const boilerplate = getBoilerplate();
+    async function reloadShader() {
+    // Compose full shader from boilerplate + graphics + audio (if available)
+    const boilerplate = getBoilerplate();  // Auto-generated
     const graphics = state.graphicsEditor.getValue();
-    
-    // Get audio code only if we have a GPU audio tab
-    const audio = hasAudioGpu ? state.audioEditor.getValue() : '';
+    const hasAudio = state.activeTabs.includes('audio');
+    const audio = hasAudio ? state.audioEditor.getValue() : '';
     const code = boilerplate + '\n' + graphics + '\n' + audio;
     
-    // Update boilerplate editor
+    // Update boilerplate editor to show latest auto-generated values
     state.boilerplateEditor.setValue(boilerplate);
     
     try {
         logStatus('Compiling...', 'info');
         clearMonacoErrors();
         
-        // Compile graphics shader
         const shaderModule = state.gpuDevice.createShaderModule({ code });
+        
         const compilationInfo = await shaderModule.getCompilationInfo();
         const errors = compilationInfo.messages.filter(m => m.type === 'error');
         
@@ -2725,67 +2174,35 @@ function restart() {
             bindGroupLayouts: [state.bindGroupLayout],
         });
         
-        // Create graphics pipeline
+        // Create graphics pipeline (8×8 workgroups for 2D)
         const newGraphicsPipeline = state.gpuDevice.createComputePipeline({
             layout: pipelineLayout,
             compute: { module: shaderModule, entryPoint: 'graphics_main' },
         });
+        
         state.graphicsPipeline = newGraphicsPipeline;
         
-        // Handle audio based on active tab type
-        let audioCompileSuccess = true;
-        if (hasAudioWorklet) {
-            // Skip AudioWorklet reload if this is just a canvas resize
-            if (skipAudioWorkletReload) {
-                // AudioWorklet is still running from before, no need to reload
-                audioCompileSuccess = true;
-            } else {
-                // Load AudioWorklet - this will always reload the code
-                const workletLoaded = await loadAudioWorklet();
-                if (workletLoaded) {
-                    state.audioMode = AUDIO_MODES.WORKLET;
-                    state.currentAudioType = 'worklet';
-                } else {
-                    // AudioWorklet failed to load - error already logged by loadAudioWorklet
-                    audioCompileSuccess = false;
-                }
-            }
-        } else if (hasAudioGpu) {
-            // Create GPU audio pipeline
+        // Create audio pipeline only if audio tab is active
+        if (hasAudio) {
             const newAudioPipeline = state.gpuDevice.createComputePipeline({
                 layout: pipelineLayout,
                 compute: { module: shaderModule, entryPoint: 'audio_main' },
             });
             state.audioPipeline = newAudioPipeline;
-            state.audioMode = AUDIO_MODES.GPU;
-            state.currentAudioType = 'gpu';
         } else {
-            // No audio - already stopped above
-            state.currentAudioType = null;
+            state.audioPipeline = null;
         }
         
-        // Compile JS
-        const jsCompileSuccess = compileUserJS();
-        
-        // Show appropriate status message
-        if (audioCompileSuccess && jsCompileSuccess) {
-            const audioStatus = hasAudioWorklet ? ' (AudioWorklet)' : hasAudioGpu ? ' (GPU Audio)' : '';
-            logStatus('✓ Compiled successfully!' + audioStatus, 'success');
-            return true; // Success
-        } else if (!audioCompileSuccess) {
-            // Audio error already logged in loadAudioWorklet, don't override
-            return false; // Failed
-        } else if (!jsCompileSuccess) {
-            // JS error already logged by compileUserJS with line number, don't override
-            return false; // Failed
+        // Also compile JS (but don't call init - that's restart's job)
+        if (compileUserJS()) {
+            logStatus('✓ Compiled successfully!', 'success');
+        } else {
+            logStatus('✓ Shader compiled, but JS has errors', 'error');
         }
         
     } catch (err) {
         logStatus('✗ ' + err.message, 'error');
-        return false; // Failed
     }
-    
-    return true; // Success by default
 }
 
     function logStatus(message, type = 'info') {
@@ -2834,18 +2251,6 @@ function restart() {
                                 uniformI32[index] = value;
                             }
                         }
-                    },
-                    audio: {
-                        send: (data) => {
-                            if (state.audioWorkletNode && state.audioWorkletNode.port) {
-                                state.audioWorkletNode.port.postMessage(data);
-                            }
-                        },
-                        setParam: (name, value) => {
-                            if (state.audioWorkletNode && state.audioWorkletNode.parameters && state.audioWorkletNode.parameters.has(name)) {
-                                state.audioWorkletNode.parameters.get(name).value = value;
-                            }
-                        }
                     }
                 };
                 state.userEnterframe(state.userState, api);
@@ -2876,8 +2281,8 @@ function restart() {
         pass.setPipeline(state.graphicsPipeline);
         pass.setBindGroup(0, bindGroup);
         pass.dispatchWorkgroups(
-            Math.ceil(state.canvasWidth / state.pixelScale / 8),
-            Math.ceil(state.canvasHeight / state.pixelScale / 8),
+            CONFIG.screenSize / 8,
+            CONFIG.screenSize / 8,
             1
         );
         
@@ -2928,7 +2333,6 @@ function restart() {
                 sampleRate: DERIVED.sampleRate,
                 samplesPerBlock: DERIVED.samplesPerBlock,
                 audioFrame: state.audioFrame,
-                audioMode: state.audioMode,
                 audioBlockGenerated: false,  // Will be set to true if audio was generated this frame
                 uniforms: {
                     setFloat: (index, value) => {
@@ -2939,18 +2343,6 @@ function restart() {
                     setInt: (index, value) => {
                         if (index >= 5 && index < 20) {
                             uniformI32[index] = value;
-                        }
-                    }
-                },
-                audio: {
-                    send: (data) => {
-                        if (state.audioWorkletNode && state.audioWorkletNode.port) {
-                            state.audioWorkletNode.port.postMessage(data);
-                        }
-                    },
-                    setParam: (name, value) => {
-                        if (state.audioWorkletNode && state.audioWorkletNode.parameters && state.audioWorkletNode.parameters.has(name)) {
-                            state.audioWorkletNode.parameters.get(name).value = value;
                         }
                     }
                 }
@@ -2997,18 +2389,17 @@ function restart() {
             ],
         });
 
-        // Check if we need to generate GPU audio THIS frame (only for GPU audio mode)
-        const needsGPUAudio = state.isPlaying && 
-                              state.audioMode === AUDIO_MODES.GPU &&
-                              state.audioPipeline &&
-                              ctx.currentTime >= state.nextAudioTime - CONFIG.audioBlockDuration && 
-                              !state.pendingAudio;
+        // Check if we need to generate audio THIS frame
+        const needsAudio = state.isPlaying && 
+                          state.audioPipeline &&
+                          ctx.currentTime >= state.nextAudioTime - CONFIG.audioBlockDuration && 
+                          !state.pendingAudio;
 
         const encoder = device.createCommandEncoder();
         const pass = encoder.beginComputePass();
         
-        // AUDIO PASS FIRST - Only for GPU audio mode!
-        if (needsGPUAudio) {
+        // AUDIO PASS FIRST - Only when we actually need a new block and have audio pipeline!
+        if (needsAudio) {
             pass.setPipeline(state.audioPipeline);
             pass.setBindGroup(0, bindGroup);
             pass.dispatchWorkgroups(
@@ -3023,14 +2414,14 @@ function restart() {
         pass.setPipeline(state.graphicsPipeline);
         pass.setBindGroup(0, bindGroup);
         pass.dispatchWorkgroups(
-            Math.ceil(state.canvasWidth / state.pixelScale / 8),   // Scaled workgroups X
-            Math.ceil(state.canvasHeight / state.pixelScale / 8),  // Scaled workgroups Y
+            CONFIG.screenSize / 8,  // 512/8 = 64 workgroups X
+            CONFIG.screenSize / 8,  // 512/8 = 64 workgroups Y
             1
         );
         
         pass.end();
 
-        if (needsGPUAudio) {
+        if (needsAudio) {
             state.pendingAudio = true;
             
             const readbackBuffer = state.audioBuffersReadback[state.readbackIndex];
