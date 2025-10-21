@@ -8,7 +8,7 @@
 </head>
 <body>
     <div id="container">
-        <div id="leftPanel">
+        <div id="devPanel">
 <div id="editorTabs" style="display: flex; margin-bottom: 0px; gap: 5px; align-items: center;">
     <!-- Tabs will be dynamically added here -->
     <button id="addPassBtn" style="padding: 6px 12px; font-size: 13px; margin-left: auto;">+ Add Pass</button>
@@ -29,11 +29,22 @@
                 <div id="errorDisplay" class="info">Loading editor...</div>
             </div>
         </div>
-        <div id="rightPanel">
+        
+        <!-- Divider between Dev and Display -->
+        <div class="panel-divider" id="divider1" data-divider="dev-display">
+            <div class="divider-handle">⋮</div>
+        </div>
+        
+        <div id="displayPanel">
             <div id="canvasContainer">
             <canvas id="canvas"></canvas>
-                <div id="resizeHandle"></div>
             </div>
+            
+            <!-- Horizontal divider for vertical canvas resizing -->
+            <div class="horizontal-divider" id="canvasResizeDivider">
+                <div class="divider-handle horizontal">⋯</div>
+            </div>
+            
             <div id="controls">
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 5px;">
                 <button id="playPauseBtn" class="playing">⏸</button>
@@ -44,7 +55,7 @@
                 <div class="sliderContainer">
                     <input type="range" id="volumeSlider" class="verticalSlider" min="0" max="100" value="50" orient="vertical">
                     <div style="font-size: 16px;">🔊</div>
-                </div>
+            </div>
                 <div class="sliderContainer">
                     <input type="range" id="pixelScaleSlider" class="verticalSlider" min="0" max="5" value="0" step="1" orient="vertical">
                     <div id="renderModeIcon" style="font-size: 16px; cursor: pointer; user-select: none;" title="Click to cycle render modes">▦</div>
@@ -56,11 +67,25 @@
                     <div>Time: <span id="timeCounter">0.00s</span></div>
                 </div>
             </div>
-            <div style="display: flex; gap: 5px; align-items: center; margin-top: 10px;">
-                <label style="color: var(--text-secondary); font-size: 13px;">Example:</label>
-                <select id="exampleSelector" style="background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-color); padding: 4px 8px; font-size: 13px; cursor: pointer; flex: 1;">
-                    <!-- Populated by JS -->
-                </select>
+            
+            <!-- Shader Info -->
+            <div id="shaderInfo" style="padding: 10px; border-top: 1px solid var(--border-color);">
+                <div id="shaderTitle" style="font-size: 14px; font-weight: 500; color: var(--text-primary); margin-bottom: 4px;">Hello World</div>
+                <div id="shaderDescription" style="font-size: 12px; color: var(--text-secondary); line-height: 1.4;">A simple gradient - perfect first shader to understand coordinates and colors</div>
+            </div>
+        </div>
+        
+        <!-- Divider between Display and Gallery -->
+        <div class="panel-divider" id="divider2" data-divider="display-gallery">
+            <div class="divider-handle">⋮</div>
+        </div>
+        
+        <div id="galleryPanel">
+            <div class="gallery-header">
+                <h2 style="margin: 0; font-size: 16px; color: var(--text-primary);">Examples</h2>
+            </div>
+            <div id="galleryContent">
+                <!-- Gallery items will be populated here -->
             </div>
         </div>
     </div>
@@ -307,7 +332,7 @@
         // Active tabs and current example
         activeTabs: ['graphics', 'help'],  // Start with just these
         currentTab: 'graphics',
-        currentExample: 'grey_blob',
+        currentExample: 'hello_world',
         currentAudioType: null,  // 'gpu' or 'worklet' - tracks which audio tab is active
         
         userState: null,
@@ -832,6 +857,71 @@ function populateExampleSelector() {
     });
 }
 
+function populateGallery() {
+    const galleryContent = document.getElementById('galleryContent');
+    if (!galleryContent) return;
+    
+    galleryContent.innerHTML = '';
+    
+    // Create gallery items for each example
+    Object.keys(EXAMPLES).forEach(exampleId => {
+        const example = EXAMPLES[exampleId];
+        
+        const item = document.createElement('div');
+        item.className = 'gallery-item';
+        item.onclick = () => loadExample(exampleId);
+        
+        // Thumbnail
+        const thumbnail = document.createElement('div');
+        thumbnail.className = 'gallery-item-thumbnail';
+        
+        if (example.thumbnail) {
+            const img = document.createElement('img');
+            img.src = example.thumbnail;
+            img.alt = example.name;
+            img.onerror = () => {
+                // Fallback if image doesn't load
+                thumbnail.innerHTML = '<div>No Preview</div>';
+            };
+            thumbnail.appendChild(img);
+        } else {
+            thumbnail.innerHTML = '<div>No Preview</div>';
+        }
+        
+        // Tech icons overlay
+        const icons = document.createElement('div');
+        icons.className = 'gallery-item-icons';
+        example.tabs.forEach(tab => {
+            if (tab !== 'help' && tab !== 'boilerplate') {
+                const icon = document.createElement('span');
+                icon.className = 'gallery-item-icon';
+                icon.textContent = getTabIcon(tab);
+                icon.title = getTabLabel(tab);
+                icons.appendChild(icon);
+            }
+        });
+        if (icons.children.length > 0) {
+            thumbnail.appendChild(icons);
+        }
+        
+        // Info - title only, no description
+        const info = document.createElement('div');
+        info.className = 'gallery-item-info';
+        
+        const title = document.createElement('div');
+        title.className = 'gallery-item-title';
+        title.textContent = example.name;
+        title.title = example.name; // Full name on hover
+        
+        info.appendChild(title);
+        
+        item.appendChild(thumbnail);
+        item.appendChild(info);
+        
+        galleryContent.appendChild(item);
+    });
+}
+
 function loadExample(exampleId) {
     const example = EXAMPLES[exampleId];
     if (!example) return;
@@ -879,6 +969,9 @@ function loadExample(exampleId) {
     // Update UI
     renderTabs();
     
+    // Update shader info display
+    updateShaderInfo(example.name, example.description || '');
+    
     // Switch to graphics tab by default
     if (state.activeTabs.includes('graphics')) {
         switchTab('graphics');
@@ -908,6 +1001,14 @@ function loadExample(exampleId) {
     } else {
         logStatus(`Loaded example: ${example.name}`, 'success');
     }
+}
+
+function updateShaderInfo(title, description) {
+    const titleEl = document.getElementById('shaderTitle');
+    const descEl = document.getElementById('shaderDescription');
+    
+    if (titleEl) titleEl.textContent = title;
+    if (descEl) descEl.textContent = description;
 }
 
 function parseJSError(err, codeLines) {
@@ -1134,9 +1235,8 @@ return { init, enterframe };
         const renderWidth = Math.floor(width / state.pixelScale);
         const renderHeight = Math.floor(height / state.pixelScale);
         
-        // Update canvas DISPLAY size first (stretches old frame - avoids black flash!)
-        state.canvas.style.width = width + 'px';
-        state.canvas.style.height = height + 'px';
+        // Note: CSS now handles display size (canvas fills container)
+        // We only need to update the render resolution (canvas.width/height)
         
         // Update resolution display
         updateResolutionDisplay();
@@ -1256,71 +1356,359 @@ return { init, enterframe };
         }
     }
     
-    function setupCanvasResize() {
-        const handle = document.getElementById('resizeHandle');
-        const container = document.getElementById('canvasContainer');
+    function setupPanelDividers() {
+        const container = document.getElementById('container');
+        const devPanel = document.getElementById('devPanel');
+        const displayPanel = document.getElementById('displayPanel');
+        const galleryPanel = document.getElementById('galleryPanel');
+        const divider1 = document.getElementById('divider1');
+        const divider2 = document.getElementById('divider2');
         
-        handle.addEventListener('mousedown', (e) => {
+        let activeDivider = null;
+        let startX = 0;
+        let startDevWidth = 0;
+        let startDisplayWidth = 0;
+        let startGalleryWidth = 0;
+        let hasMoved = false;
+        let clickTimeout = null;
+        
+        // Collapsed state
+        const panelState = {
+            devCollapsed: false,
+            galleryCollapsed: false
+        };
+        
+        const COLLAPSED_WIDTH = 0; // Width in pixels when collapsed (fully hidden)
+        
+        function startDrag(divider, e) {
             e.preventDefault();
-            state.isResizing = true;
-            state.resizeStartX = e.clientX;
-            state.resizeStartY = e.clientY;
-            state.resizeStartWidth = state.canvasWidth;
-            state.resizeStartHeight = state.canvasHeight;
-            container.classList.add('resizing');
-        });
+            
+            activeDivider = divider;
+            startX = e.clientX;
+            hasMoved = false;
+            
+            const containerWidth = container.offsetWidth;
+            startDevWidth = (devPanel.offsetWidth / containerWidth) * 100;
+            startDisplayWidth = (displayPanel.offsetWidth / containerWidth) * 100;
+            startGalleryWidth = (galleryPanel.offsetWidth / containerWidth) * 100;
+            
+            // Disable transitions during drag for instant feedback
+            devPanel.style.transition = 'none';
+            displayPanel.style.transition = 'none';
+            galleryPanel.style.transition = 'none';
+            
+            divider.classList.add('dragging');
+            document.body.style.cursor = 'ew-resize';
+            document.body.style.userSelect = 'none';
+        }
         
-        document.addEventListener('mousemove', (e) => {
-            if (!state.isResizing) return;
+        function onDrag(e) {
+            if (!activeDivider) return;
             
-            // Calculate new size (left handle means negative X increases width)
-            const deltaX = state.resizeStartX - e.clientX;  // Reversed for left side
-            const deltaY = e.clientY - state.resizeStartY;
+            // Don't allow dragging if adjacent panel is collapsed
+            if (activeDivider === divider1 && panelState.devCollapsed) return;
+            if (activeDivider === divider2 && panelState.galleryCollapsed) return;
             
-            let newWidth = state.resizeStartWidth + deltaX;
-            let newHeight = state.resizeStartHeight + deltaY;
+            const containerWidth = container.offsetWidth;
+            const deltaX = e.clientX - startX;
+            const deltaPercent = (deltaX / containerWidth) * 100;
+            
+            // Track if mouse has moved (to distinguish click from drag)
+            if (Math.abs(deltaX) > 3) {
+                hasMoved = true;
+            }
+            
+            if (activeDivider === divider1) {
+                // Dragging between dev and display
+                let newDevWidth = startDevWidth + deltaPercent;
+                let newDisplayWidth = startDisplayWidth - deltaPercent;
+                
+                // Min widths in pixels (convert from CSS min-width)
+                const minDevPx = 300;
+                const minDisplayPx = 250;
+                const minDevPercent = (minDevPx / containerWidth) * 100;
+                const minDisplayPercent = (minDisplayPx / containerWidth) * 100;
+                
+                // Apply constraints
+                if (newDevWidth < minDevPercent) {
+                    newDevWidth = minDevPercent;
+                    newDisplayWidth = startDisplayWidth + (startDevWidth - minDevPercent);
+                } else if (newDisplayWidth < minDisplayPercent) {
+                    newDisplayWidth = minDisplayPercent;
+                    newDevWidth = startDevWidth + (startDisplayWidth - minDisplayPercent);
+                }
+                
+                devPanel.style.width = newDevWidth + '%';
+                displayPanel.style.width = newDisplayWidth + '%';
+                
+            } else if (activeDivider === divider2) {
+                // Dragging between display and gallery
+                let newDisplayWidth = startDisplayWidth + deltaPercent;
+                let newGalleryWidth = startGalleryWidth - deltaPercent;
+                
+                const minDisplayPx = 250;
+                const minGalleryPx = 200;
+                const minDisplayPercent = (minDisplayPx / containerWidth) * 100;
+                const minGalleryPercent = (minGalleryPx / containerWidth) * 100;
+                
+                // Apply constraints
+                if (newDisplayWidth < minDisplayPercent) {
+                    newDisplayWidth = minDisplayPercent;
+                    newGalleryWidth = startGalleryWidth + (startDisplayWidth - minDisplayPercent);
+                } else if (newGalleryWidth < minGalleryPercent) {
+                    newGalleryWidth = minGalleryPercent;
+                    newDisplayWidth = startDisplayWidth + (startGalleryWidth - minGalleryPercent);
+                }
+                
+                displayPanel.style.width = newDisplayWidth + '%';
+                galleryPanel.style.width = newGalleryWidth + '%';
+            }
+        }
+        
+        function stopDrag() {
+            if (!activeDivider) return;
+            
+            const divider = activeDivider;
+            activeDivider.classList.remove('dragging');
+            activeDivider = null;
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            
+            // Re-enable transitions after drag
+            devPanel.style.transition = '';
+            displayPanel.style.transition = '';
+            galleryPanel.style.transition = '';
+            
+            // If didn't move, it was a click - toggle collapse
+            if (!hasMoved) {
+                if (divider === divider1) {
+                    togglePanelCollapse('dev');
+                } else if (divider === divider2) {
+                    togglePanelCollapse('gallery');
+                }
+            } else {
+                // Save panel widths after drag
+                savePanelWidths();
+            }
+        }
+        
+        function togglePanelCollapse(panel) {
+            const containerWidth = container.offsetWidth;
+            const collapsedPercent = (COLLAPSED_WIDTH / containerWidth) * 100;
+            
+            // Get current widths as percentages
+            const currentDevWidth = (devPanel.offsetWidth / containerWidth) * 100;
+            const currentDisplayWidth = (displayPanel.offsetWidth / containerWidth) * 100;
+            const currentGalleryWidth = (galleryPanel.offsetWidth / containerWidth) * 100;
+            
+            if (panel === 'dev') {
+                panelState.devCollapsed = !panelState.devCollapsed;
+                
+                if (panelState.devCollapsed) {
+                    // Collapse dev panel - give space to display
+                    const freedSpace = currentDevWidth - collapsedPercent;
+                    devPanel.style.width = collapsedPercent + '%';
+                    displayPanel.style.width = (currentDisplayWidth + freedSpace) + '%';
+                    devPanel.classList.add('collapsed');
+                } else {
+                    // Expand dev panel - take space from display
+                    const targetDevWidth = 50;
+                    const spaceNeeded = targetDevWidth - collapsedPercent;
+                    devPanel.style.width = targetDevWidth + '%';
+                    displayPanel.style.width = (currentDisplayWidth - spaceNeeded) + '%';
+                    devPanel.classList.remove('collapsed');
+                }
+            } else if (panel === 'gallery') {
+                panelState.galleryCollapsed = !panelState.galleryCollapsed;
+                
+                if (panelState.galleryCollapsed) {
+                    // Collapse gallery panel - give space to display
+                    const freedSpace = currentGalleryWidth - collapsedPercent;
+                    galleryPanel.style.width = collapsedPercent + '%';
+                    displayPanel.style.width = (currentDisplayWidth + freedSpace) + '%';
+                    galleryPanel.classList.add('collapsed');
+                } else {
+                    // Expand gallery panel - take space from display
+                    const targetGalleryWidth = 20;
+                    const spaceNeeded = targetGalleryWidth - collapsedPercent;
+                    galleryPanel.style.width = targetGalleryWidth + '%';
+                    displayPanel.style.width = (currentDisplayWidth - spaceNeeded) + '%';
+                    galleryPanel.classList.remove('collapsed');
+                }
+            }
+            
+            // Save collapsed state
+            savePanelState();
+        }
+        
+        function savePanelState() {
+            // TEMPORARILY DISABLED
+            // localStorage.setItem('sleditor_panel_state', JSON.stringify(panelState));
+        }
+        
+        function loadPanelState() {
+            const stored = localStorage.getItem('sleditor_panel_state');
+            if (stored) {
+                try {
+                    const state = JSON.parse(stored);
+                    if (state.devCollapsed) togglePanelCollapse('dev');
+                    if (state.galleryCollapsed) togglePanelCollapse('gallery');
+                } catch (e) {
+                    console.error('Failed to load panel state:', e);
+                }
+            }
+        }
+        
+        divider1.addEventListener('mousedown', (e) => startDrag(divider1, e));
+        divider2.addEventListener('mousedown', (e) => startDrag(divider2, e));
+        document.addEventListener('mousemove', onDrag);
+        document.addEventListener('mouseup', stopDrag);
+        
+        // TEMPORARILY DISABLED - Load saved collapse state
+        // loadPanelState();
+        
+        // Clear any corrupted localStorage data on first load
+        console.log('Panel localStorage cleared for fresh start');
+        localStorage.removeItem('sleditor_panel_widths');
+        localStorage.removeItem('sleditor_panel_state');
+        
+        // Setup horizontal canvas resize divider
+        setupCanvasVerticalResize();
+    }
+    
+    function setupCanvasVerticalResize() {
+        const divider = document.getElementById('canvasResizeDivider');
+        const canvasContainer = document.getElementById('canvasContainer');
+        
+        let isDragging = false;
+        let startY = 0;
+        let startHeight = 0;
+        
+        function startDrag(e) {
+            e.preventDefault();
+            isDragging = true;
+            startY = e.clientY;
+            startHeight = canvasContainer.offsetHeight;
+            
+            divider.classList.add('dragging');
+            document.body.style.cursor = 'ns-resize';
+            document.body.style.userSelect = 'none';
+        }
+        
+        function onDrag(e) {
+            if (!isDragging) return;
+            
+            const deltaY = e.clientY - startY;
+            let newHeight = startHeight + deltaY;
             
             // Get browser constraints
-            const maxWidth = window.innerWidth * 0.66;
             const maxHeight = window.innerHeight * 0.75;
             
             // Apply constraints
-            newWidth = Math.max(256, Math.min(newWidth, maxWidth));
             newHeight = Math.max(256, Math.min(newHeight, maxHeight));
             
             // Snap to 16px grid
-            newWidth = Math.round(newWidth / 16) * 16;
             newHeight = Math.round(newHeight / 16) * 16;
             
-            // Update display size only (stretch existing image)
-            state.canvas.style.width = newWidth + 'px';
-            state.canvas.style.height = newHeight + 'px';
-        });
+            // Add class to disable flex and set explicit height
+            canvasContainer.classList.add('explicit-height');
+            canvasContainer.style.height = newHeight + 'px';
+        }
         
-        document.addEventListener('mouseup', (e) => {
-            if (!state.isResizing) return;
+        function stopDrag() {
+            if (!isDragging) return;
             
-            state.isResizing = false;
-            container.classList.remove('resizing');
+            isDragging = false;
+            divider.classList.remove('dragging');
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
             
-            // Get final size from style (what was stretched to)
-            const finalWidth = parseInt(state.canvas.style.width);
-            const finalHeight = parseInt(state.canvas.style.height);
-            
-            // Only recompile if size actually changed
-            if (finalWidth !== state.canvasWidth || finalHeight !== state.canvasHeight) {
-                updateCanvasSize(finalWidth, finalHeight, true);
+            // Canvas will auto-resize via ResizeObserver
+        }
+        
+        divider.addEventListener('mousedown', startDrag);
+        document.addEventListener('mousemove', onDrag);
+        document.addEventListener('mouseup', stopDrag);
+    }
+    
+    function setupCanvasResizeObserver() {
+        const canvasContainer = document.getElementById('canvasContainer');
+        const canvas = state.canvas;
+        
+        const resizeObserver = new ResizeObserver(entries => {
+            for (const entry of entries) {
+                const { width, height } = entry.contentRect;
+                
+                // Snap to 16px grid
+                const newWidth = Math.round(width / 16) * 16;
+                const newHeight = Math.round(height / 16) * 16;
+                
+                // Only update if size actually changed (already snapped to 16px grid)
+                if (newWidth !== state.canvasWidth || newHeight !== state.canvasHeight) {
+                    updateCanvasSize(newWidth, newHeight, true);
+                }
             }
         });
+        
+        resizeObserver.observe(canvasContainer);
+    }
+    
+    function savePanelWidths() {
+        // TEMPORARILY DISABLED
+        // const devPanel = document.getElementById('devPanel');
+        // const displayPanel = document.getElementById('displayPanel');
+        // const galleryPanel = document.getElementById('galleryPanel');
+        // 
+        // const widths = {
+        //     dev: devPanel.style.width || '50%',
+        //     display: displayPanel.style.width || '30%',
+        //     gallery: galleryPanel.style.width || '20%'
+        // };
+        // 
+        // localStorage.setItem('sleditor_panel_widths', JSON.stringify(widths));
+    }
+    
+    function loadPanelWidths() {
+        // TEMPORARILY DISABLED
+        // const stored = localStorage.getItem('sleditor_panel_widths');
+        // if (!stored) return;
+        // 
+        // try {
+        //     const widths = JSON.parse(stored);
+        //     const devPanel = document.getElementById('devPanel');
+        //     const displayPanel = document.getElementById('displayPanel');
+        //     const galleryPanel = document.getElementById('galleryPanel');
+        //     
+        //     if (devPanel) devPanel.style.width = widths.dev;
+        //     if (displayPanel) displayPanel.style.width = widths.display;
+        //     if (galleryPanel) galleryPanel.style.width = widths.gallery;
+        // } catch (e) {
+        //     console.error('Failed to load panel widths:', e);
+        // }
     }
 
     function setupUI() {
-        // Canvas
+        // Canvas and container
         state.canvas = document.getElementById('canvas');
+        const canvasContainer = document.getElementById('canvasContainer');
+        
+        // Set initial container size with explicit height
+        canvasContainer.classList.add('explicit-height');
+        canvasContainer.style.height = state.canvasHeight + 'px';
+        
         updateCanvasSize(state.canvasWidth, state.canvasHeight, false);
         
-        // Canvas resize handle
-        setupCanvasResize();
+        // Load saved panel widths
+        loadPanelWidths();
+        
+        // Setup panel dividers for resizing
+        setupPanelDividers();
+        
+        // Setup canvas resize observer
+        setupCanvasResizeObserver();
+        
+        // Populate gallery with examples
+        populateGallery();
 
         // Play/Pause button
         document.getElementById('playPauseBtn').addEventListener('click', togglePlayPause);
@@ -1384,9 +1772,6 @@ return { init, enterframe };
                 logStatus('Audio resynced after visibility change', 'info');
             }
         });
-        
-        // Initialize example selector
-        populateExampleSelector();
         
         // Initialize tab display
         renderTabs();

@@ -284,7 +284,8 @@ function enterframe(state, api) {
 const EXAMPLES = {
         grey_blob: {
         name: "Grey Blob",
-        description: "imported glsl raymarching",
+        description: "Imported GLSL raymarching shader with mesmerizing organic motion",
+        thumbnail: "thumbnails/greyblob.png",
         tabs: ["graphics", "help"],
         graphics: `/*
 //port of this shadertoy by diatribes:
@@ -339,7 +340,8 @@ fn graphics_main(@builtin(global_invocation_id) gid: vec3<u32>) {
     },
     hello_world: {
         name: "Hello World",
-        description: "A simple gradient",
+        description: "A simple gradient - perfect first shader to understand coordinates and colors",
+        thumbnail: "thumbnails/new.png",
         tabs: ["graphics", "help"],
         graphics: `// Simple gradient - your first shader!
 @compute @workgroup_size(8, 8, 1)
@@ -359,7 +361,8 @@ fn graphics_main(@builtin(global_invocation_id) gid: vec3<u32>) {
     
     animated_pattern: {
         name: "Animated Pattern",
-        description: "Time-based animation",
+        description: "Time-based animation with sine waves creating dynamic patterns",
+        thumbnail: "thumbnails/animatedpattern.png",
         tabs: ["graphics"],
         graphics: `// Animated pattern using time
 @compute @workgroup_size(8, 8, 1)
@@ -390,7 +393,8 @@ fn graphics_main(@builtin(global_invocation_id) gid: vec3<u32>) {
     
     mouse_interactive: {
         name: "Mouse Interactive",
-        description: "Mouse controls the pattern",
+        description: "Mouse creates ripple effects - move your cursor to interact!",
+        thumbnail: "thumbnails/mouseinteractive.png",
         tabs: ["graphics", "js"],
         graphics: `// Mouse-controlled visuals
 @compute @workgroup_size(8, 8, 1)
@@ -438,7 +442,8 @@ function enterframe(state, api) {
     
     simple_tone: {
         name: "Simple Tone (AudioWorklet)",
-        description: "Basic audio synthesis with AudioWorklet",
+        description: "Basic audio synthesis with AudioWorklet - pure sine wave generation",
+        thumbnail: "thumbnails/audioworklet.png",
         tabs: ["graphics", "audio", "js"],
         graphics: `// Visualize the frequency
 @compute @workgroup_size(8, 8, 1)
@@ -532,7 +537,8 @@ function enterframe(state, api) {
     
     waveform_viz: {
         name: "Waveform Visualizer",
-        description: "Multi-scale audio visualization (complex)",
+        description: "Multi-scale audio visualization with GPU-based waveform analysis",
+        thumbnail: "thumbnails/audiowgsl.png",
         tabs: ["graphics", "audio", "js", "boilerplate"],
         graphics: getDefaultGraphicsShader(),
         audio: getDefaultAudioShader(),
