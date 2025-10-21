@@ -1,0 +1,228 @@
+:root {
+    /* Dark mode colors (default) */
+    --bg-primary: #1e1e1e;
+    --bg-secondary: #2d2d2d;
+    --bg-tertiary: #3c3c3c;
+    --text-primary: #d4d4d4;
+    --text-secondary: #858585;
+    --border-color: #111111;
+    --shadow-color: #1e1e1e;
+}
+
+body.light-mode {
+    /* Light mode colors */
+    --bg-primary: #eeeeff;
+    --bg-secondary:#ccccee;
+    --bg-tertiary: #bbbbee;
+    --text-primary: #182247;
+    --text-secondary: #6e6e6e;
+    --border-color: #8888cc;
+    --shadow-color: #8888cc;
+}
+
+body {
+    margin: 0;
+    padding: 10px;
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    font-family: system-ui, -apple-system, sans-serif;
+    overflow: hidden;
+    transition: background 0.3s, color 0.3s;
+}
+
+#editorTabs {
+    display: flex;
+    gap: 5px;
+    margin-bottom: 5px;
+}
+
+.editorTab {
+    background:var(--bg-secondary);
+    color: var(--text-secondary);
+    border: none;
+    padding: 6px 12px;
+    cursor: pointer;
+    font-size: 13px;
+    transition: background 0.3s, color 0.3s;
+}
+
+.editorTab.active {
+    background:var(--bg-primary);
+    color: var(--text-primary);
+    box-shadow: 2px 2px 2px var(--shadow-color);
+    border-top: 1px solid var(--border-color);
+        border-right: 1px solid var(--border-color);
+        border-left: 1px solid var(--border-color);
+}
+
+/* Shared editor container styles */
+.editor-panel {
+    flex: 1;
+    border: 1px solid var(--border-color);
+    overflow: hidden;
+    box-shadow: 2px 2px 2px var(--shadow-color);
+}
+
+
+#container {
+    display: flex;
+    gap: 10px;
+    height: 98vh;
+    
+}
+
+#leftPanel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0px;
+    min-width: 400px;
+}
+
+#rightPanel {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+#editorContainer {
+    flex: 1;
+    border: 1px solid var(--border-color);
+    overflow: hidden;
+    position: relative;
+    
+}
+
+#loadingMessage {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: var(--text-secondary);
+    font-size: 14px;
+}
+
+#controls {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+button {
+    background: #0e639c;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    transition: background 0.2s;
+}
+
+button:hover {
+    background: #1177bb;
+}
+
+button.playing {
+    background: #16825d;
+}
+
+button.playing:hover {
+    background: #1a9870;
+}
+
+button.paused {
+    background: #c5a332;
+}
+
+button.paused:hover {
+    background: #d4b547;
+}
+
+.verticalSlider {
+    writing-mode: bt-lr; /* IE */
+    -webkit-appearance: slider-vertical; /* WebKit */
+    appearance: slider-vertical; /* Standard */
+    width: 8px;
+    height: 80px;
+    padding: 0;
+    margin: 0;
+}
+
+.sliderContainer {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 5px;
+}
+
+#errorDisplay {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    padding: 10px;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: 12px;
+    min-height: 60px;
+    max-height: 120px;
+    overflow-y: auto;
+    transition: background 0.3s, border 0.3s;
+}
+
+.error { color: #f48771; }
+.success { color: #4ec9b0; }
+.info { color: #9cdcfe; }
+
+#canvasContainer {
+    position: relative;
+    width: fit-content;
+    border: 1px solid var(--border-color);
+}
+
+#canvas {
+    display: block;
+    /* image-rendering set dynamically via JS */
+}
+
+#resizeHandle {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 20px;
+    height: 20px;
+    cursor: nesw-resize;
+    background: linear-gradient(225deg, transparent 0%, transparent 50%, #0e639c 50%, #0e639c 100%);
+    opacity: 0.6;
+    transition: opacity 0.2s;
+}
+
+#resizeHandle:hover {
+    opacity: 1;
+}
+
+#canvasContainer.resizing #canvas {
+    pointer-events: none;
+}
+
+.hint {
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
+.statusBadge {
+    display: inline-block;
+    padding: 2px 8px;
+    font-size: 11px;
+    font-weight: bold;
+}
+
+.statusBadge.playing {
+    background: #16825d;
+    color: white;
+}
+
+.statusBadge.paused {
+    background: #c5a332;
+    color: white;
+}
+
