@@ -24,10 +24,13 @@
 </div>
 <div id="helpContainer" class="editor-panel" style="display: none;">
 </div>
-            <div>
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <div style="flex: 1;">
                 <div class="hint">Status:</div>
-                <div id="errorDisplay" class="info"></div>
+                    <div id="errorDisplay" class="info"></div>
             </div>
+                <button id="saveShaderBtn" title="Save current shader">💾 Save</button>
+        </div>
         </div>
         
         <!-- Divider between Dev and Display -->
@@ -86,6 +89,29 @@
             </div>
             <div id="galleryContent">
                 <!-- Gallery items will be populated here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Save Shader Modal -->
+    <div id="saveModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <h2>Save Shader</h2>
+            <div class="modal-field">
+                <label for="saveModalTitle">Title (required):</label>
+                <input type="text" id="saveModalTitle" placeholder="My Amazing Shader" maxlength="50" />
+            </div>
+            <div class="modal-field">
+                <label for="saveModalDescription">Description (optional):</label>
+                <textarea id="saveModalDescription" placeholder="What does this shader do?" maxlength="200" rows="3"></textarea>
+            </div>
+            <div class="modal-field">
+                <label for="saveModalTags">Tags (optional, comma-separated):</label>
+                <input type="text" id="saveModalTags" placeholder="graphics, fractal, audio" maxlength="50" />
+            </div>
+            <div class="modal-buttons">
+                <button id="saveCancelBtn">Cancel</button>
+                <button id="saveConfirmBtn" class="primary">Save</button>
             </div>
         </div>
     </div>
@@ -335,6 +361,10 @@
         currentExample: 'hello_world',
         currentAudioType: null,  // 'gpu' or 'worklet' - tracks which audio tab is active
         
+        // Save/Load tracking
+        isDirty: false,  // Track unsaved changes
+        currentSavedShader: null,  // Currently loaded saved shader (if any)
+        
         userState: null,
         userInit: null,
         userEnterframe: null,
@@ -566,6 +596,15 @@
             window.clearJSErrors = function() {
                 monaco.editor.setModelMarkers(state.jsEditor.getModel(), 'javascript', []);
             };
+            
+            // Set up dirty tracking for all editors
+            if (window.setupEditorDirtyTracking) {
+                window.setupEditorDirtyTracking(state.graphicsEditor);
+                window.setupEditorDirtyTracking(state.audioEditor);
+                window.setupEditorDirtyTracking(state.jsEditor);
+                window.setupEditorDirtyTracking(state.boilerplateEditor);
+                // Help is read-only, no need to track
+            }
             
             callback();
         });
@@ -863,6 +902,91 @@ function populateGallery() {
     
     galleryContent.innerHTML = '';
     
+    // ===== MY SHADERS SECTION =====
+    const savedShaders = getAllSavedShaders();
+    if (savedShaders.length > 0) {
+        const myShadersHeader = document.createElement('h3');
+        myShadersHeader.textContent = 'My Shaders';
+        myShadersHeader.style.cssText = 'grid-column: 1 / -1; margin: 10px 0 5px 0; padding-bottom: 5px; border-bottom: 1px solid var(--border-color); color: var(--text-primary); font-size: 14px;';
+        galleryContent.appendChild(myShadersHeader);
+        
+        savedShaders.forEach(shader => {
+            const item = document.createElement('div');
+            item.className = 'gallery-item';
+            item.style.position = 'relative';
+            
+            // Thumbnail
+            const thumbnail = document.createElement('div');
+            thumbnail.className = 'gallery-item-thumbnail';
+            
+            if (shader.thumbnail) {
+                const img = document.createElement('img');
+                img.src = shader.thumbnail;
+                img.alt = shader.title;
+                thumbnail.appendChild(img);
+            } else {
+                thumbnail.innerHTML = '<div>No Preview</div>';
+            }
+            
+            // Tech icons overlay
+            const icons = document.createElement('div');
+            icons.className = 'gallery-item-icons';
+            shader.tabs.forEach(tab => {
+                if (tab !== 'help' && tab !== 'boilerplate') {
+                    const icon = document.createElement('span');
+                    icon.className = 'gallery-item-icon';
+                    icon.textContent = getTabIcon(tab);
+                    icon.title = getTabLabel(tab);
+                    icons.appendChild(icon);
+                }
+            });
+            if (icons.children.length > 0) {
+                thumbnail.appendChild(icons);
+            }
+            
+            // Delete button
+            const deleteBtn = document.createElement('button');
+            deleteBtn.textContent = '🗑️';
+            deleteBtn.title = 'Delete shader';
+            deleteBtn.className = 'gallery-delete-btn';
+            deleteBtn.onclick = (e) => {
+                e.stopPropagation();
+                deleteSavedShader(shader.id);
+            };
+            thumbnail.appendChild(deleteBtn);
+            
+            // Click to load
+            item.onclick = () => loadSavedShader(shader.id);
+            
+            // Info
+            const info = document.createElement('div');
+            info.className = 'gallery-item-info';
+            
+            const title = document.createElement('div');
+            title.className = 'gallery-item-title';
+            title.textContent = shader.title;
+            title.title = shader.title;
+            
+            info.appendChild(title);
+            
+            item.appendChild(thumbnail);
+            item.appendChild(info);
+            
+            galleryContent.appendChild(item);
+        });
+        
+        // Divider before examples
+        const divider = document.createElement('hr');
+        divider.style.cssText = 'grid-column: 1 / -1; margin: 15px 0 10px 0; border: none; border-top: 1px solid var(--border-color);';
+        galleryContent.appendChild(divider);
+    }
+    
+    // ===== EXAMPLES SECTION =====
+    const examplesHeader = document.createElement('h3');
+    examplesHeader.textContent = 'Examples';
+    examplesHeader.style.cssText = 'grid-column: 1 / -1; margin: 10px 0 5px 0; padding-bottom: 5px; border-bottom: 1px solid var(--border-color); color: var(--text-primary); font-size: 14px;';
+    galleryContent.appendChild(examplesHeader);
+    
     // Create gallery items for each example
     Object.keys(EXAMPLES).forEach(exampleId => {
         const example = EXAMPLES[exampleId];
@@ -927,6 +1051,11 @@ function loadExample(exampleId) {
     if (!example) return;
     
     state.currentExample = exampleId;
+    
+    // Clear saved shader reference (we're loading an example now)
+    state.currentSavedShader = null;
+    state.isDirty = false;
+    updateSaveButton();
     
     // Convert old 'audio' tab references to new audio_gpu or audio_worklet
     const updatedTabs = example.tabs.map(tab => {
@@ -1191,6 +1320,7 @@ return { init, enterframe };
         applyTheme();
         
         setupUI();
+        setupSaveSystem();
         
         // Initialize audio FIRST to get actual sample rate
         initWebAudio();
@@ -1675,6 +1805,342 @@ return { init, enterframe };
         // }
     }
 
+    // ===== SAVE/LOAD SYSTEM =====
+    
+    const MAX_SAVED_SHADERS = 10;
+    
+    function captureThumbnail() {
+        try {
+            // Capture canvas as data URL
+            return state.canvas.toDataURL('image/png', 0.8);
+        } catch (e) {
+            console.error('Failed to capture thumbnail:', e);
+            return null;
+        }
+    }
+    
+    function getAllSavedShaders() {
+        try {
+            const saved = localStorage.getItem('savedShaders');
+            return saved ? JSON.parse(saved) : [];
+        } catch (e) {
+            console.error('Failed to load saved shaders:', e);
+            return [];
+        }
+    }
+    
+    function saveShaderToStorage(title, description, tags) {
+        const thumbnail = captureThumbnail();
+        
+        const shaderData = {
+            id: Date.now(),
+            title: title.trim(),
+            description: description.trim(),
+            tags: tags.split(',').map(t => t.trim()).filter(t => t),
+            thumbnail: thumbnail,
+            code: {
+                boilerplate: state.boilerplateEditor ? state.boilerplateEditor.getValue() : '',
+                graphics: state.graphicsEditor ? state.graphicsEditor.getValue() : '',
+                audio_gpu: state.activeTabs.includes('audio_gpu') && state.audioEditor ? state.audioEditor.getValue() : '',
+                audio_worklet: state.activeTabs.includes('audio_worklet') && state.audioEditor ? state.audioEditor.getValue() : '',
+                js: state.jsEditor ? state.jsEditor.getValue() : ''
+            },
+            tabs: [...state.activeTabs],
+            currentTab: state.currentTab,
+            canvasWidth: state.canvasWidth,
+            canvasHeight: state.canvasHeight,
+            pixelScale: state.pixelScale,
+            created: new Date().toISOString(),
+            modified: new Date().toISOString()
+        };
+        
+        let savedShaders = getAllSavedShaders();
+        
+        // If editing an existing saved shader, update it
+        if (state.currentSavedShader) {
+            const index = savedShaders.findIndex(s => s.id === state.currentSavedShader.id);
+            if (index !== -1) {
+                shaderData.id = state.currentSavedShader.id;
+                shaderData.created = state.currentSavedShader.created;
+                savedShaders[index] = shaderData;
+            } else {
+                savedShaders.push(shaderData);
+            }
+        } else {
+            savedShaders.push(shaderData);
+        }
+        
+        // Enforce limit
+        if (savedShaders.length > MAX_SAVED_SHADERS) {
+            // Sort by modified date, keep most recent
+            savedShaders.sort((a, b) => new Date(b.modified) - new Date(a.modified));
+            savedShaders = savedShaders.slice(0, MAX_SAVED_SHADERS);
+        }
+        
+        try {
+            localStorage.setItem('savedShaders', JSON.stringify(savedShaders));
+            state.currentSavedShader = shaderData;
+            state.isDirty = false;
+            updateSaveButton();
+            populateGallery();  // Refresh gallery
+            logStatus(`✓ Saved "${title}"`);
+            return true;
+        } catch (e) {
+            console.error('Failed to save shader:', e);
+            if (e.name === 'QuotaExceededError') {
+                logStatus('✗ Storage quota exceeded. Try deleting some saved shaders.');
+            } else {
+                logStatus('✗ Failed to save shader: ' + e.message);
+            }
+            return false;
+        }
+    }
+    
+    function loadSavedShader(shaderId) {
+        const savedShaders = getAllSavedShaders();
+        const shader = savedShaders.find(s => s.id === shaderId);
+        
+        if (!shader) {
+            console.error('Shader not found:', shaderId);
+            return;
+        }
+        
+        // Clear example reference (we're loading a saved shader now)
+        state.currentExample = null;
+        state.currentSavedShader = shader;
+        state.isDirty = false;
+        updateSaveButton();
+        
+        // Set canvas dimensions and pixel scale
+        state.canvasWidth = shader.canvasWidth || 512;
+        state.canvasHeight = shader.canvasHeight || 512;
+        state.pixelScale = shader.pixelScale || 1;
+        
+        // Update pixel scale slider UI to match loaded value
+        const scales = [1, 2, 3, 4, 6, 8];
+        const scaleIndex = scales.indexOf(state.pixelScale);
+        const pixelScaleSlider = document.getElementById('pixelScaleSlider');
+        if (pixelScaleSlider && scaleIndex !== -1) {
+            pixelScaleSlider.value = scaleIndex;
+        }
+        
+        // Update canvas size and resolution display (but don't recompile yet)
+        updateCanvasSize(state.canvasWidth, state.canvasHeight, false);
+        
+        // Restore tabs
+        state.activeTabs = [...shader.tabs];
+        
+        // Determine current audio type from tabs
+        if (state.activeTabs.includes('audio_gpu')) {
+            state.currentAudioType = 'gpu';
+        } else if (state.activeTabs.includes('audio_worklet')) {
+            state.currentAudioType = 'worklet';
+        } else {
+            state.currentAudioType = null;
+        }
+        
+        // Restore code to editors
+        if (state.boilerplateEditor && shader.code.boilerplate) {
+            state.boilerplateEditor.setValue(shader.code.boilerplate);
+        }
+        if (state.graphicsEditor && shader.code.graphics) {
+            state.graphicsEditor.setValue(shader.code.graphics);
+        }
+        if (shader.code.audio_gpu && state.activeTabs.includes('audio_gpu')) {
+            if (state.audioEditor) {
+                state.audioEditor.setValue(shader.code.audio_gpu);
+            }
+        }
+        if (shader.code.audio_worklet && state.activeTabs.includes('audio_worklet')) {
+            if (state.audioEditor) {
+                state.audioEditor.setValue(shader.code.audio_worklet);
+            }
+        }
+        if (state.jsEditor && shader.code.js) {
+            state.jsEditor.setValue(shader.code.js);
+        }
+        
+        // Update UI
+        renderTabs();
+        updateShaderInfo(shader.title, shader.description);
+        
+        // Switch to saved tab
+        if (shader.currentTab && state.activeTabs.includes(shader.currentTab)) {
+            switchTab(shader.currentTab);
+        } else if (state.activeTabs.includes('graphics')) {
+            switchTab('graphics');
+        } else if (state.activeTabs.length > 0) {
+            switchTab(state.activeTabs[0]);
+        }
+        
+        // Reload shader with new code, then restart and auto-play
+        if (state.isRunning) {
+            reloadShader().then((success) => {
+                // Restart regardless (to reset state)
+                restart();
+                if (!state.isPlaying) {
+                    state.isPlaying = true;
+                    state.audioContext.resume();
+                    updatePlayPauseButton();
+                }
+            }).catch((err) => {
+                console.error('Failed to load saved shader (caught):', err);
+            });
+        }
+    }
+    
+    function deleteSavedShader(shaderId) {
+        if (!confirm('Delete this saved shader?')) return;
+        
+        let savedShaders = getAllSavedShaders();
+        savedShaders = savedShaders.filter(s => s.id !== shaderId);
+        
+        try {
+            localStorage.setItem('savedShaders', JSON.stringify(savedShaders));
+            
+            // If we deleted the currently loaded shader, clear the reference
+            if (state.currentSavedShader && state.currentSavedShader.id === shaderId) {
+                state.currentSavedShader = null;
+                updateSaveButton();
+            }
+            
+            populateGallery();  // Refresh gallery
+            logStatus('✓ Shader deleted');
+        } catch (e) {
+            console.error('Failed to delete shader:', e);
+            logStatus('✗ Failed to delete shader');
+        }
+    }
+    
+    function markDirty() {
+        if (!state.isDirty) {
+            state.isDirty = true;
+            updateSaveButton();
+        }
+    }
+    
+    function updateSaveButton() {
+        const btn = document.getElementById('saveShaderBtn');
+        if (!btn) return;
+        
+        if (state.isDirty) {
+            btn.textContent = '💾 Save*';
+            btn.title = 'Save current shader (unsaved changes)';
+        } else {
+            btn.textContent = '💾 Save';
+            btn.title = 'Save current shader';
+        }
+    }
+    
+    function showSaveModal() {
+        const modal = document.getElementById('saveModal');
+        const titleInput = document.getElementById('saveModalTitle');
+        const descInput = document.getElementById('saveModalDescription');
+        const tagsInput = document.getElementById('saveModalTags');
+        
+        // Pre-fill if editing existing saved shader
+        if (state.currentSavedShader) {
+            titleInput.value = state.currentSavedShader.title;
+            descInput.value = state.currentSavedShader.description;
+            tagsInput.value = state.currentSavedShader.tags.join(', ');
+        } else {
+            titleInput.value = '';
+            descInput.value = '';
+            tagsInput.value = '';
+        }
+        
+        modal.style.display = 'flex';
+        titleInput.focus();
+    }
+    
+    function hideSaveModal() {
+        document.getElementById('saveModal').style.display = 'none';
+    }
+    
+    function setupSaveSystem() {
+        const saveBtn = document.getElementById('saveShaderBtn');
+        const saveCancelBtn = document.getElementById('saveCancelBtn');
+        const saveConfirmBtn = document.getElementById('saveConfirmBtn');
+        const titleInput = document.getElementById('saveModalTitle');
+        
+        if (!saveBtn) {
+            console.error('Save button not found!');
+            return;
+        }
+        
+        saveBtn.addEventListener('click', () => {
+            showSaveModal();
+        });
+        
+        saveCancelBtn.addEventListener('click', () => {
+            hideSaveModal();
+        });
+        
+        saveConfirmBtn.addEventListener('click', () => {
+            // Get fresh references to the input fields
+            const titleInputFresh = document.getElementById('saveModalTitle');
+            const descInputFresh = document.getElementById('saveModalDescription');
+            const tagsInputFresh = document.getElementById('saveModalTags');
+            
+            if (!titleInputFresh) {
+                console.error('Title input element not found!');
+                logStatus('✗ Error: Title input not found');
+                return;
+            }
+            
+            const title = titleInputFresh.value.trim();
+            const description = descInputFresh ? descInputFresh.value : '';
+            const tags = tagsInputFresh ? tagsInputFresh.value : '';
+            
+            if (!title) {
+                logStatus('⚠ Title is required');
+                titleInputFresh.focus();
+                titleInputFresh.style.borderColor = 'red';
+                return;
+            }
+            
+            titleInputFresh.style.borderColor = '';
+            
+            if (saveShaderToStorage(title, description, tags)) {
+                hideSaveModal();
+            }
+        });
+        
+        // Enter to save in title field
+        titleInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                saveConfirmBtn.click();
+            }
+        });
+        
+        // Close modal on background click
+        document.getElementById('saveModal').addEventListener('click', (e) => {
+            if (e.target.id === 'saveModal') {
+                hideSaveModal();
+            }
+        });
+        
+        // Track changes in editors
+        function setupDirtyTracking(editor) {
+            if (!editor) return;
+            editor.onDidChangeModelContent(() => {
+                markDirty();
+            });
+        }
+        
+        // Will be set up after monaco initializes
+        window.setupEditorDirtyTracking = setupDirtyTracking;
+        
+        // Warn before leaving with unsaved changes
+        window.addEventListener('beforeunload', (e) => {
+            if (state.isDirty) {
+                e.preventDefault();
+                e.returnValue = ''; // Chrome requires returnValue to be set
+                return ''; // Some browsers need a return value
+            }
+        });
+    }
+
     function setupUI() {
         // Canvas and container
         state.canvas = document.getElementById('canvas');
@@ -1846,7 +2312,7 @@ function restart(showMessage = false) {
             if (showMessage) {
                 const statusDisplay = document.getElementById('errorDisplay');
                 if (!statusDisplay.classList.contains('error')) {
-                    logStatus('Restarted from beginning', 'success');
+            logStatus('Restarted from beginning', 'success');
                 }
             }
         } catch (err) {
