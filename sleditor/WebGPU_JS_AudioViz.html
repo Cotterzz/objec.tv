@@ -1750,14 +1750,14 @@ return { init, enterframe };
             state.mouseY = 1.0 - (e.clientY - rect.top) / rect.height; // Flip Y
         });
         
-        // Handle visibility change
+        // Handle visibility change - resync audio timing when tab becomes visible
         document.addEventListener('visibilitychange', () => {
             if (!document.hidden && state.audioContext && state.isPlaying) {
                 const ctx = state.audioContext;
                 state.nextAudioTime = Math.ceil(ctx.currentTime / CONFIG.audioBlockDuration) 
                                      * CONFIG.audioBlockDuration;
                 state.pendingAudio = false;
-                logStatus('Audio resynced after visibility change', 'info');
+                // Silent resync - no status message needed
             }
         });
         
