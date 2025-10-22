@@ -26,7 +26,7 @@
 </div>
             <div>
                 <div class="hint">Status:</div>
-                <div id="errorDisplay" class="info">Loading editor...</div>
+                <div id="errorDisplay" class="info"></div>
             </div>
         </div>
         
@@ -989,17 +989,12 @@ function loadExample(exampleId) {
                 state.audioContext.resume();
                 updatePlayPauseButton();
             }
-            // Only show success message if compilation succeeded
-            if (success) {
-            logStatus(`Loaded example: ${example.name}`, 'success');
-            }
-            // If failed, error message is already shown by reloadShader()
+            // Compile time message already shown by reloadShader()
+            // Example name shown in shader info display
         }).catch((err) => {
             // Error already logged in reloadShader, just don't show success message
             console.error('Failed to load example (caught):', err);
         });
-    } else {
-        logStatus(`Loaded example: ${example.name}`, 'success');
     }
 }
 
@@ -1086,13 +1081,7 @@ return { init, enterframe };
         state.userInit = userFunctions.init;
         state.userEnterframe = userFunctions.enterframe;
         
-        // Only show success message if there's no error already showing
-        if (!useDefault) {
-            const statusDisplay = document.getElementById('errorDisplay');
-            if (!statusDisplay.classList.contains('error')) {
-            logStatus('✓ JavaScript compiled successfully', 'success');
-            }
-        }
+        // Success - no message needed (compile time report shown by reloadShader)
         return true;
     } catch (err) {
         if (useDefault) {
@@ -1220,7 +1209,7 @@ return { init, enterframe };
                 updatePlayPauseButton();
                 
                 requestAnimationFrame(render);
-                logStatus('Ready! Animation playing.', 'success');
+                // Compile time message already shown by reloadShader() above
             } catch (err) {
                 logStatus('Initialization failed: ' + err.message, 'error');
             }
@@ -1257,8 +1246,7 @@ return { init, enterframe };
                     });
                 }
                 
-                const scaleLabel = state.pixelScale === 1 ? 'High' : state.pixelScale === 2 ? 'Medium' : 'Low';
-                logStatus(`Canvas: ${width}×${height} (${scaleLabel}: ${renderWidth}×${renderHeight})`, 'success');
+                // Canvas resized - no status message needed
                 
                 // Always render immediately to fill the canvas (paused or playing)
                 if (!state.isPlaying && state.isRunning) {
@@ -1714,7 +1702,7 @@ return { init, enterframe };
         document.getElementById('playPauseBtn').addEventListener('click', togglePlayPause);
         
         // Restart button
-        document.getElementById('restartBtn').addEventListener('click', restart);
+        document.getElementById('restartBtn').addEventListener('click', () => restart(true));
 
         // Reload button
         document.getElementById('reloadBtn').addEventListener('click', reloadShader);
@@ -1785,7 +1773,6 @@ function togglePlayPause() {
         state.audioContext.suspend();
         state.isPlaying = false;
         state.lastPauseTime = performance.now();
-        logStatus('Paused', 'info');
     } else {
         // RESUME everything
         state.audioContext.resume();
@@ -1801,8 +1788,6 @@ function togglePlayPause() {
         state.nextAudioTime = Math.ceil(ctx.currentTime / CONFIG.audioBlockDuration) 
                              * CONFIG.audioBlockDuration;
         state.pendingAudio = false;
-        
-        logStatus('Playing', 'success');
     }
     
     updatePlayPauseButton();
@@ -1819,7 +1804,7 @@ function updatePlayPauseButton() {
     }
 }
 
-function restart() {
+function restart(showMessage = false) {
     // Reset time tracking
     const now = performance.now();
     state.startTime = now;
@@ -1857,10 +1842,12 @@ function restart() {
         try {
             state.userState = state.userInit ? state.userInit() : {};
             clearJSErrors();
-            // Only show "Restarted" message if there's no error already showing
-            const statusDisplay = document.getElementById('errorDisplay');
-            if (!statusDisplay.classList.contains('error')) {
-            logStatus('Restarted from beginning', 'success');
+            // Only show "Restarted" message if explicitly requested (user clicked restart button)
+            if (showMessage) {
+                const statusDisplay = document.getElementById('errorDisplay');
+                if (!statusDisplay.classList.contains('error')) {
+                    logStatus('Restarted from beginning', 'success');
+                }
             }
         } catch (err) {
             const code = state.jsEditor?.getValue() || INVISIBLE_DEFAULT_JS;
@@ -2176,7 +2163,14 @@ function restart() {
         logStatus('Compiling...', 'info');
         clearMonacoErrors();
         
+        // Start timing
+        const startTotal = performance.now();
+        let timeWGSL = 0;
+        let timeAudio = 0;
+        let timeJS = 0;
+        
         // Compile graphics shader
+        const startWGSL = performance.now();
         const shaderModule = state.gpuDevice.createShaderModule({ code });
         const compilationInfo = await shaderModule.getCompilationInfo();
         const errors = compilationInfo.messages.filter(m => m.type === 'error');
@@ -2199,9 +2193,11 @@ function restart() {
             compute: { module: shaderModule, entryPoint: 'graphics_main' },
         });
         state.graphicsPipeline = newGraphicsPipeline;
+        timeWGSL = performance.now() - startWGSL;
         
         // Handle audio based on active tab type
         let audioCompileSuccess = true;
+        const startAudio = performance.now();
         if (hasAudioWorklet) {
             // Skip AudioWorklet reload if this is just a canvas resize
             if (skipAudioWorkletReload) {
@@ -2231,14 +2227,30 @@ function restart() {
             // No audio - already stopped above
             state.currentAudioType = null;
         }
+        timeAudio = performance.now() - startAudio;
         
         // Compile JS
+        const startJS = performance.now();
         const jsCompileSuccess = compileUserJS();
+        timeJS = performance.now() - startJS;
         
         // Show appropriate status message
         if (audioCompileSuccess && jsCompileSuccess) {
-            const audioStatus = hasAudioWorklet ? ' (AudioWorklet)' : hasAudioGpu ? ' (GPU Audio)' : '';
-            logStatus('✓ Compiled successfully!' + audioStatus, 'success');
+            const totalTime = performance.now() - startTotal;
+            
+            // Build timing info string
+            // Note: WGSL includes both graphics and GPU audio (compiled together)
+            let timingParts = [`WGSL: ${timeWGSL.toFixed(1)}ms`];
+            
+            // Only show separate audio time for AudioWorklet (different compilation path)
+            if (hasAudioWorklet && timeAudio > 0.1) {
+                timingParts.push(`Worklet: ${timeAudio.toFixed(1)}ms`);
+            }
+            
+            timingParts.push(`JS: ${timeJS.toFixed(1)}ms`);
+            const timingStr = timingParts.join(', ');
+            
+            logStatus(`✓ Compiled in ${totalTime.toFixed(1)}ms (${timingStr})`, 'success');
             return true; // Success
         } else if (!audioCompileSuccess) {
             // Audio error already logged in loadAudioWorklet, don't override
